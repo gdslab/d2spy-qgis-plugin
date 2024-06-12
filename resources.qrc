@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/d2s_browser" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>

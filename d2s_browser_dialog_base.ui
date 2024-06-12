@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>D2SBrowserDialogBase</class>
+ <widget class="QDialog" name="D2SBrowserDialogBase">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>600</width>
+    <height>340</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>D2S Browser</string>
+  </property>
+  <widget class="QWidget" name="">
+   <property name="geometry">
+    <rect>
+     <x>20</x>
+     <y>20</y>
+     <width>561</width>
+     <height>301</height>
+    </rect>
+   </property>
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="0" column="1" rowspan="3">
+     <layout class="QVBoxLayout" name="dataProductsVerticalLayout">
+      <item>
+       <widget class="QLabel" name="dataProductsLabel">
+        <property name="text">
+         <string>Data Products:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QListWidget" name="dataProductsListWidget"/>
+      </item>
+      <item>
+       <widget class="QPushButton" name="dataProductsPushButton">
+        <property name="text">
+         <string>Add Selected to Map</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item row="0" column="0">
+     <layout class="QVBoxLayout" name="authVerticalLayout">
+      <item>
+       <layout class="QFormLayout" name="authFormLayout">
+        <item row="0" column="0">
+         <widget class="QLabel" name="serverLabel">
+          <property name="text">
+           <string>Server:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QLineEdit" name="serverLineEdit">
+          <property name="text">
+           <string/>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="emailLabel">
+          <property name="text">
+           <string>Email:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QLineEdit" name="emailLineEdit">
+          <property name="text">
+           <string/>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="passwordLabel">
+          <property name="text">
+           <string>Password:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QLineEdit" name="passwordLineEdit">
+          <property name="inputMask">
+           <string/>
+          </property>
+          <property name="text">
+           <string/>
+          </property>
+          <property name="echoMode">
+           <enum>QLineEdit::Password</enum>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QPushButton" name="loginPushButton">
+        <property name="text">
+         <string>Login</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item row="1" column="0">
+     <spacer name="verticalSpacer">
+      <property name="orientation">
+       <enum>Qt::Vertical</enum>
+      </property>
+      <property name="sizeHint" stdset="0">
+       <size>
+        <width>20</width>
+        <height>40</height>
+       </size>
+      </property>
+     </spacer>
+    </item>
+    <item row="2" column="0">
+     <layout class="QVBoxLayout" name="projectsVerticalLayout">
+      <item>
+       <layout class="QFormLayout" name="formLayout">
+        <item row="0" column="0">
+         <widget class="QLabel" name="projectsLabel">
+          <property name="text">
+           <string>Projects:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QComboBox" name="projectsComboBox">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="flightsLabel">
+          <property name="text">
+           <string>Flights:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QComboBox" name="flightsComboBox">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QPushButton" name="projectsRefreshPushButton">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>Refresh</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
