@@ -339,10 +339,18 @@ class D2SBrowser:
         selected_flight = self.flights[self.dlg.flightsComboBox.currentIndex()]
 
         # Get user data products for flight
-        self.data_products = selected_flight.get_data_products()
+        all_data_products = selected_flight.get_data_products()
+        # Filter out any non-raster data products (e.g., point clouds)
+        self.data_products = [
+            data_product
+            for data_product in all_data_products
+            if data_product.data_type != "point_cloud"
+        ]
+
         if len(self.data_products) > 0:
             # Create list item for each data product
             for index, data_product in enumerate(self.data_products):
+                # Add data product to list with unchecked checkbox
                 item = QListWidgetItem(data_product.data_type)
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                 item.setCheckState(Qt.Unchecked)
