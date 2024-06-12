@@ -224,6 +224,10 @@ class D2SBrowser:
             self.dlg.loginPushButton.clicked.connect(self.login)
             # Event when project combobox changed
             self.dlg.projectsComboBox.currentIndexChanged.connect(self.update_flights)
+            # Event when flight combobox changed
+            self.dlg.flightsComboBox.currentIndexChanged.connect(
+                self.update_data_products
+            )
             # Event when project refresh button clicked
             self.dlg.projectsRefreshPushButton.clicked.connect(self.update_projects)
             # Event when add to map button clicked
