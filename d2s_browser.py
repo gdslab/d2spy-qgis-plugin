@@ -308,7 +308,8 @@ class D2SBrowser:
             # Get user flights for first project
             self.update_flights()
         else:
-            # No projects, clear current flights and data products
+            # No projects, clear current projects, flights, and data products
+            self.dlg.projectsComboBox.clear()
             self.dlg.flightsComboBox.clear()
             self.dlg.dataProductsListWidget.clear()
 
@@ -328,15 +329,22 @@ class D2SBrowser:
             self.flights, key=lambda flight: flight.acquisition_date, reverse=True
         )
 
+        # Filter out flights without data products that can be visualized
+        self.flights = [
+            flight for flight in self.flights if self.has_viewable_data_products(flight)
+        ]
+
         # Add flights (if any) to combobox
         if len(self.flights) > 0:
+            # Add flight acquisition dates to combobox
             self.dlg.flightsComboBox.addItems(
                 [flight.acquisition_date for flight in self.flights]
             )
             # Update data products
             self.update_data_products()
         else:
-            # No flights, clear current data products
+            # No flights, clear current flights and data products
+            self.dlg.flightsComboBox.clear()
             self.dlg.dataProductsListWidget.clear()
 
     def update_data_products(self):
@@ -370,6 +378,9 @@ class D2SBrowser:
 
                 # Add data product list item to list widget
                 self.dlg.dataProductsListWidget.addItem(item)
+        else:
+            # No data products, clear current data products
+            self.dlg.dataProductsListWidget.clear()
 
     def add_data_products_to_map(self):
         """Add data products selected in data products UI list to map."""
@@ -397,3 +408,24 @@ class D2SBrowser:
         # Zoom to last added layer
         self.iface.zoomToActiveLayer()
         self.iface.mapCanvas().refresh()
+
+    def has_viewable_data_products(self, flight):
+        """Return True if the flight has at least one non-point cloud data product.
+
+        Args:
+            flight (Flight): Flight from D2S.
+
+        Returns:
+            bool: True if flight had one non-point cloud data product, otherwise False.
+        """
+        data_products = flight.get_data_products()
+        if len(data_products) > 0:
+            data_products_without_point_clouds = [
+                data_product
+                for data_product in data_products
+                if data_product.data_type != "point_cloud"
+            ]
+            if len(data_products_without_point_clouds) > 0:
+                return True
+
+        return False
