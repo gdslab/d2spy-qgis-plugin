@@ -297,6 +297,10 @@ class D2SBrowser:
         # Get and add user projects
         self.projects = self.workspace.get_projects()
         if len(self.projects) > 0:
+            # Sort projects by title a - z
+            self.projects = sorted(
+                self.projects, key=lambda project: project.title.lower()
+            )
             # Add projects to combobox
             self.dlg.projectsComboBox.addItems(
                 [project.title for project in self.projects]
@@ -318,6 +322,11 @@ class D2SBrowser:
 
         # Get flights for selected project
         self.flights = selected_project.get_flights()
+
+        # Sort by acquisition date
+        self.flights = sorted(
+            self.flights, key=lambda flight: flight.acquisition_date, reverse=True
+        )
 
         # Add flights (if any) to combobox
         if len(self.flights) > 0:
@@ -346,6 +355,10 @@ class D2SBrowser:
             for data_product in all_data_products
             if data_product.data_type != "point_cloud"
         ]
+        # Sort by data type
+        self.data_products = sorted(
+            self.data_products, key=lambda data_product: data_product.data_type
+        )
 
         if len(self.data_products) > 0:
             # Create list item for each data product
