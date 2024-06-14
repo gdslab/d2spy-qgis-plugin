@@ -45,7 +45,7 @@ except (ImportError, ModuleNotFoundError):
     import sys
 
     base_path = os.path.dirname(os.path.realpath(__file__))
-    whl_path = os.path.join(base_path, "d2spy-0.0.8-py3-none-any.whl")
+    whl_path = os.path.join(base_path, "d2spy-0.0.9-py3-none-any.whl")
     sys.path.append(whl_path)
 
     from d2spy.auth import Auth
@@ -295,7 +295,7 @@ class D2SBrowser:
         self.dlg.projectsComboBox.clear()
 
         # Get and add user projects
-        self.projects = self.workspace.get_projects()
+        self.projects = self.workspace.get_projects(has_raster=True)
         if len(self.projects) > 0:
             # Sort projects by title a - z
             self.projects = sorted(
@@ -322,17 +322,12 @@ class D2SBrowser:
         selected_project = self.projects[self.dlg.projectsComboBox.currentIndex()]
 
         # Get flights for selected project
-        self.flights = selected_project.get_flights()
+        self.flights = selected_project.get_flights(has_raster=True)
 
         # Sort by acquisition date
         self.flights = sorted(
             self.flights, key=lambda flight: flight.acquisition_date, reverse=True
         )
-
-        # Filter out flights without data products that can be visualized
-        self.flights = [
-            flight for flight in self.flights if self.has_viewable_data_products(flight)
-        ]
 
         # Add flights (if any) to combobox
         if len(self.flights) > 0:
@@ -408,24 +403,3 @@ class D2SBrowser:
         # Zoom to last added layer
         self.iface.zoomToActiveLayer()
         self.iface.mapCanvas().refresh()
-
-    def has_viewable_data_products(self, flight):
-        """Return True if the flight has at least one non-point cloud data product.
-
-        Args:
-            flight (Flight): Flight from D2S.
-
-        Returns:
-            bool: True if flight had one non-point cloud data product, otherwise False.
-        """
-        data_products = flight.get_data_products()
-        if len(data_products) > 0:
-            data_products_without_point_clouds = [
-                data_product
-                for data_product in data_products
-                if data_product.data_type != "point_cloud"
-            ]
-            if len(data_products_without_point_clouds) > 0:
-                return True
-
-        return False
