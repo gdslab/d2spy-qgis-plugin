@@ -45,7 +45,7 @@ except (ImportError, ModuleNotFoundError):
     import sys
 
     base_path = os.path.dirname(os.path.realpath(__file__))
-    whl_path = os.path.join(base_path, "d2spy-0.0.9-py3-none-any.whl")
+    whl_path = os.path.join(base_path, "d2spy-0.0.10-py3-none-any.whl")
     sys.path.append(whl_path)
 
     from d2spy.auth import Auth
@@ -332,9 +332,17 @@ class D2SBrowser:
         # Add flights (if any) to combobox
         if len(self.flights) > 0:
             # Add flight acquisition dates to combobox
-            self.dlg.flightsComboBox.addItems(
-                [flight.acquisition_date for flight in self.flights]
-            )
+            flight_items = []
+            for flight in self.flights:
+                if flight.name:
+                    if len(flight.name) > 20:
+                        name = flight.name[:17] + "..."
+                    else:
+                        name = flight.name
+                    flight_items.append(f"{flight.acquisition_date} ({name})")
+                else:
+                    flight_items.append(flight.acquisition_date)
+            self.dlg.flightsComboBox.addItems(flight_items)
             # Update data products
             self.update_data_products()
         else:
