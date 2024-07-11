@@ -45,7 +45,7 @@ except (ImportError, ModuleNotFoundError):
     import sys
 
     base_path = os.path.dirname(os.path.realpath(__file__))
-    whl_path = os.path.join(base_path, "d2spy-0.0.10-py3-none-any.whl")
+    whl_path = os.path.join(base_path, "d2spy-0.0.11-py3-none-any.whl")
     sys.path.append(whl_path)
 
     from d2spy.auth import Auth
