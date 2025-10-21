@@ -24,15 +24,24 @@
 from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer
 from qgis.gui import QgsMessageBar
 
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
+from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QThread
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QDialogButtonBox, QListWidgetItem, QSizePolicy, QApplication
+from qgis.PyQt.QtWidgets import (
+    QAction,
+    QDialogButtonBox,
+    QListWidgetItem,
+    QSizePolicy,
+    QApplication,
+)
 
 # Initialize Qt resources from file resources.py
 from .resources import *
 
 # Import the code for the dialog
 from .d2s_browser_dialog import D2SBrowserDialog
+
+# Import worker classes for threaded API calls
+from .d2s_browser_workers import ProjectsWorker, FlightsWorker, DataProductsWorker
 import os.path
 import sys
 
@@ -44,6 +53,9 @@ if libs_path not in sys.path:
 # Import d2spy - now available from bundled libs/
 from d2spy.auth import Auth
 from d2spy.workspace import Workspace
+
+
+NON_RASTER_TYPES = frozenset({"panoramic", "point_cloud", "3dgs"})
 
 
 class D2SBrowser:
@@ -94,6 +106,16 @@ class D2SBrowser:
 
         # Store data products returned from API
         self.data_products = []
+
+        # Store active threads to prevent garbage collection
+        self.projects_thread = None
+        self.flights_thread = None
+        self.data_products_thread = None
+
+        # Cache API responses to avoid redundant requests
+        self.projects_cache = None
+        self.flights_cache = {}  # Key: project_id, Value: list of flights
+        self.data_products_cache = {}  # Key: flight_id, Value: list of data products
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -199,6 +221,18 @@ class D2SBrowser:
 
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
+        # Clean up any running threads
+        if self.projects_thread is not None:
+            self.projects_thread.quit()
+            self.projects_thread.wait()
+        if self.flights_thread is not None:
+            self.flights_thread.quit()
+            self.flights_thread.wait()
+        if self.data_products_thread is not None:
+            self.data_products_thread.quit()
+            self.data_products_thread.wait()
+
+        # Remove UI elements
         for action in self.actions:
             self.iface.removePluginMenu(self.tr("&D2S Browser"), action)
             self.iface.removeToolBarIcon(action)
@@ -223,7 +257,7 @@ class D2SBrowser:
                 self.update_data_products
             )
             # Event when project refresh button clicked
-            self.dlg.projectsRefreshPushButton.clicked.connect(self.update_projects)
+            self.dlg.projectsRefreshPushButton.clicked.connect(self.refresh_projects)
             # Event when add to map button clicked
             self.dlg.dataProductsPushButton.clicked.connect(
                 self.add_data_products_to_map
@@ -241,19 +275,41 @@ class D2SBrowser:
 
     def set_status(self, message):
         """Set status bar message."""
-        if hasattr(self.dlg, 'statusBar'):
+        if hasattr(self.dlg, "statusBar"):
             self.dlg.statusBar.setText(message)
             # Force the UI to update immediately
             QApplication.processEvents()
 
     def clear_status(self):
         """Clear status bar message."""
-        if hasattr(self.dlg, 'statusBar'):
+        if hasattr(self.dlg, "statusBar"):
             self.dlg.statusBar.setText("")
             QApplication.processEvents()
 
+    def set_ui_enabled(self, enabled):
+        """Enable or disable UI controls during API calls."""
+        if hasattr(self.dlg, "projectsComboBox"):
+            self.dlg.projectsComboBox.setEnabled(enabled)
+        if hasattr(self.dlg, "flightsComboBox"):
+            self.dlg.flightsComboBox.setEnabled(enabled)
+        if hasattr(self.dlg, "dataProductsListWidget"):
+            self.dlg.dataProductsListWidget.setEnabled(enabled)
+        if hasattr(self.dlg, "projectsRefreshPushButton"):
+            self.dlg.projectsRefreshPushButton.setEnabled(enabled)
+        if hasattr(self.dlg, "dataProductsPushButton"):
+            self.dlg.dataProductsPushButton.setEnabled(enabled)
+
+    def clear_cache(self):
+        """Clear all cached API responses."""
+        self.projects_cache = None
+        self.flights_cache = {}
+        self.data_products_cache = {}
+
     def login(self):
         """Login to D2S instance using server, email, and password collected from UI."""
+        # Clear cache from any previous session
+        self.clear_cache()
+
         # Show status
         self.set_status("Logging in...")
 
@@ -267,7 +323,29 @@ class D2SBrowser:
 
         # Login to D2S instance using provided credentials
         auth = Auth(server)
-        session = auth.login(email, password)
+        try:
+            session = auth.login(email, password)
+        except EOFError:
+            # This occurs when d2spy tries to use getpass.getpass() for password re-entry
+            # after authentication failure, but there's no interactive terminal in QGIS
+            self.clear_status()
+            self.iface.messageBar().pushMessage(
+                "Error",
+                "Authentication failed. Please check your email and password.",
+                level=Qgis.Critical,
+                duration=10,
+            )
+            return
+        except Exception as e:
+            # Catch any other authentication errors
+            self.clear_status()
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Authentication error: {str(e)}",
+                level=Qgis.Critical,
+                duration=10,
+            )
+            return
 
         if not session:
             self.clear_status()
@@ -304,25 +382,93 @@ class D2SBrowser:
         # Get user projects
         self.update_projects()
 
-    def update_projects(self):
-        """Fetch user's projects from D2S instance and update projects UI combobox."""
-        # Show status
-        self.set_status("Loading projects...")
+    def refresh_projects(self):
+        """Refresh projects by clearing cache and fetching fresh data."""
+        # Clear cache
+        self.clear_cache()
 
-        # Clear current projects
+        # Block signals to prevent cascading updates during clear
+        self.dlg.projectsComboBox.blockSignals(True)
+        self.dlg.flightsComboBox.blockSignals(True)
+
+        # Clear all UI elements immediately
         self.dlg.projectsComboBox.clear()
+        self.dlg.flightsComboBox.clear()
+        self.dlg.dataProductsListWidget.clear()
 
-        # Get and add user projects
-        self.projects = self.workspace.get_projects(has_raster=True)
+        # Unblock signals
+        self.dlg.projectsComboBox.blockSignals(False)
+        self.dlg.flightsComboBox.blockSignals(False)
+
+        # Disable UI during refresh
+        self.set_ui_enabled(False)
+
+        # Show status
+        self.set_status("Refreshing projects...")
+
+        # Fetch fresh data (which will cascade to flights and data products)
+        self.update_projects(use_cache=False)
+
+    def update_projects(self, use_cache=True):
+        """Fetch user's projects from D2S instance and update projects UI combobox.
+
+        Args:
+            use_cache (bool): If True, use cached data if available. Defaults to True.
+        """
+        # Check cache first
+        if use_cache and self.projects_cache is not None:
+            # Clear current projects before loading from cache
+            self.dlg.projectsComboBox.clear()
+            # Use cached data
+            self.on_projects_loaded(self.projects_cache)
+            return
+
+        # Clear current projects (if not already cleared)
+        if self.dlg.projectsComboBox.count() > 0:
+            self.dlg.projectsComboBox.clear()
+
+        # Show status and disable UI
+        self.set_status("Loading projects...")
+        self.set_ui_enabled(False)
+
+        # Clean up existing thread if any
+        if self.projects_thread is not None:
+            self.projects_thread.quit()
+            self.projects_thread.wait()
+
+        # Create worker and thread
+        self.projects_thread = QThread()
+        self.projects_worker = ProjectsWorker(self.workspace)
+        self.projects_worker.moveToThread(self.projects_thread)
+
+        # Connect signals
+        self.projects_thread.started.connect(self.projects_worker.run)
+        self.projects_worker.finished.connect(self.on_projects_loaded)
+        self.projects_worker.error.connect(self.on_projects_error)
+        self.projects_worker.finished.connect(self.projects_thread.quit)
+        self.projects_worker.error.connect(self.projects_thread.quit)
+
+        # Start thread
+        self.projects_thread.start()
+
+    def on_projects_loaded(self, projects):
+        """Handle successful projects load."""
+        self.projects = projects
+        # Cache the projects for future use
+        self.projects_cache = projects
         if len(self.projects) > 0:
             # Sort projects by title a - z
             self.projects = sorted(
                 self.projects, key=lambda project: project.title.lower()
             )
+            # Block signals to prevent duplicate update_flights() calls
+            self.dlg.projectsComboBox.blockSignals(True)
             # Add projects to combobox
             self.dlg.projectsComboBox.addItems(
                 [project.title for project in self.projects]
             )
+            # Unblock signals
+            self.dlg.projectsComboBox.blockSignals(False)
             # Get user flights for first project
             self.update_flights()
         else:
@@ -331,20 +477,72 @@ class D2SBrowser:
             self.dlg.flightsComboBox.clear()
             self.dlg.dataProductsListWidget.clear()
             self.set_status("No projects found")
+            # Re-enable UI
+            self.set_ui_enabled(True)
 
-    def update_flights(self):
-        """Fetch flights from selected project and update flights UI combobox."""
-        # Show status
-        self.set_status("Loading flights...")
+    def on_projects_error(self, error_message):
+        """Handle projects load error."""
+        self.clear_status()
+        self.iface.messageBar().pushMessage(
+            "Error",
+            f"Failed to load projects: {error_message}",
+            level=Qgis.Critical,
+            duration=10,
+        )
+        # Re-enable UI
+        self.set_ui_enabled(True)
 
+    def update_flights(self, use_cache=True):
+        """Fetch flights from selected project and update flights UI combobox.
+
+        Args:
+            use_cache (bool): If True, use cached data if available. Defaults to True.
+        """
         # Clear current flights
         self.dlg.flightsComboBox.clear()
 
         # Currently selected project
         selected_project = self.projects[self.dlg.projectsComboBox.currentIndex()]
 
-        # Get flights for selected project
-        self.flights = selected_project.get_flights(has_raster=True)
+        # Check cache first
+        if use_cache and selected_project.id in self.flights_cache:
+            # Use cached data
+            self.on_flights_loaded(self.flights_cache[selected_project.id])
+            return
+
+        # Show status
+        self.set_status("Loading flights...")
+
+        # Disable UI during API call
+        self.set_ui_enabled(False)
+
+        # Clean up existing thread if any
+        if self.flights_thread is not None:
+            self.flights_thread.quit()
+            self.flights_thread.wait()
+
+        # Create worker and thread
+        self.flights_thread = QThread()
+        self.flights_worker = FlightsWorker(selected_project)
+        self.flights_worker.moveToThread(self.flights_thread)
+
+        # Connect signals
+        self.flights_thread.started.connect(self.flights_worker.run)
+        self.flights_worker.finished.connect(self.on_flights_loaded)
+        self.flights_worker.error.connect(self.on_flights_error)
+        self.flights_worker.finished.connect(self.flights_thread.quit)
+        self.flights_worker.error.connect(self.flights_thread.quit)
+
+        # Start thread
+        self.flights_thread.start()
+
+    def on_flights_loaded(self, flights):
+        """Handle successful flights load."""
+        self.flights = flights
+
+        # Cache the flights for this project
+        selected_project = self.projects[self.dlg.projectsComboBox.currentIndex()]
+        self.flights_cache[selected_project.id] = flights
 
         # Sort by acquisition date
         self.flights = sorted(
@@ -364,7 +562,11 @@ class D2SBrowser:
                     flight_items.append(f"{flight.acquisition_date} ({name})")
                 else:
                     flight_items.append(flight.acquisition_date)
+            # Block signals to prevent duplicate update_data_products() calls
+            self.dlg.flightsComboBox.blockSignals(True)
             self.dlg.flightsComboBox.addItems(flight_items)
+            # Unblock signals
+            self.dlg.flightsComboBox.blockSignals(False)
             # Update data products
             self.update_data_products()
         else:
@@ -372,25 +574,76 @@ class D2SBrowser:
             self.dlg.flightsComboBox.clear()
             self.dlg.dataProductsListWidget.clear()
             self.set_status("No flights found")
+            # Re-enable UI
+            self.set_ui_enabled(True)
 
-    def update_data_products(self):
-        """Fetch data products from selected flight and update data products UI list."""
-        # Show status
-        self.set_status("Loading data products...")
+    def on_flights_error(self, error_message):
+        """Handle flights load error."""
+        self.clear_status()
+        self.iface.messageBar().pushMessage(
+            "Error",
+            f"Failed to load flights: {error_message}",
+            level=Qgis.Critical,
+            duration=10,
+        )
+        # Re-enable UI
+        self.set_ui_enabled(True)
 
+    def update_data_products(self, use_cache=True):
+        """Fetch data products from selected flight and update data products UI list.
+
+        Args:
+            use_cache (bool): If True, use cached data if available. Defaults to True.
+        """
         # Clear current data products
         self.dlg.dataProductsListWidget.clear()
 
         # Currently selected flight
         selected_flight = self.flights[self.dlg.flightsComboBox.currentIndex()]
 
-        # Get user data products for flight
-        all_data_products = selected_flight.get_data_products()
+        # Check cache first
+        if use_cache and selected_flight.id in self.data_products_cache:
+            # Use cached data
+            self.on_data_products_loaded(self.data_products_cache[selected_flight.id])
+            return
+
+        # Show status
+        self.set_status("Loading data products...")
+
+        # Disable UI during API call
+        self.set_ui_enabled(False)
+
+        # Clean up existing thread if any
+        if self.data_products_thread is not None:
+            self.data_products_thread.quit()
+            self.data_products_thread.wait()
+
+        # Create worker and thread
+        self.data_products_thread = QThread()
+        self.data_products_worker = DataProductsWorker(selected_flight)
+        self.data_products_worker.moveToThread(self.data_products_thread)
+
+        # Connect signals
+        self.data_products_thread.started.connect(self.data_products_worker.run)
+        self.data_products_worker.finished.connect(self.on_data_products_loaded)
+        self.data_products_worker.error.connect(self.on_data_products_error)
+        self.data_products_worker.finished.connect(self.data_products_thread.quit)
+        self.data_products_worker.error.connect(self.data_products_thread.quit)
+
+        # Start thread
+        self.data_products_thread.start()
+
+    def on_data_products_loaded(self, all_data_products):
+        """Handle successful data products load."""
+        # Cache the data products for this flight
+        selected_flight = self.flights[self.dlg.flightsComboBox.currentIndex()]
+        self.data_products_cache[selected_flight.id] = all_data_products
+
         # Filter out any non-raster data products (e.g., point clouds)
         self.data_products = [
             data_product
             for data_product in all_data_products
-            if data_product.data_type != "point_cloud"
+            if data_product.data_type not in NON_RASTER_TYPES
         ]
         # Sort by data type
         self.data_products = sorted(
@@ -412,6 +665,21 @@ class D2SBrowser:
             # No data products, clear current data products
             self.dlg.dataProductsListWidget.clear()
             self.set_status("No data products found")
+
+        # Re-enable UI
+        self.set_ui_enabled(True)
+
+    def on_data_products_error(self, error_message):
+        """Handle data products load error."""
+        self.clear_status()
+        self.iface.messageBar().pushMessage(
+            "Error",
+            f"Failed to load data products: {error_message}",
+            level=Qgis.Critical,
+            duration=10,
+        )
+        # Re-enable UI
+        self.set_ui_enabled(True)
 
     def add_data_products_to_map(self):
         """Add data products selected in data products UI list to map."""
@@ -457,6 +725,8 @@ class D2SBrowser:
 
         # Update status
         if layers_added > 0:
-            self.set_status(f"Added {layers_added} layer{'s' if layers_added > 1 else ''} to map")
+            self.set_status(
+                f"Added {layers_added} layer{'s' if layers_added > 1 else ''} to map"
+            )
         else:
             self.set_status("No layers to add")
