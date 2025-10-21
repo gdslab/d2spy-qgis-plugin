@@ -13,16 +13,9 @@
   <property name="windowTitle">
    <string>D2S Browser</string>
   </property>
-  <widget class="QWidget" name="">
-   <property name="geometry">
-    <rect>
-     <x>20</x>
-     <y>20</y>
-     <width>561</width>
-     <height>301</height>
-    </rect>
-   </property>
-   <layout class="QGridLayout" name="gridLayout">
+  <layout class="QVBoxLayout" name="mainVerticalLayout">
+   <item>
+    <layout class="QGridLayout" name="gridLayout">
     <item row="0" column="1" rowspan="3">
      <layout class="QVBoxLayout" name="dataProductsVerticalLayout">
       <item>
@@ -176,7 +169,27 @@
      </layout>
     </item>
    </layout>
-  </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="statusBar">
+     <property name="text">
+      <string/>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::StyledPanel</enum>
+     </property>
+     <property name="frameShadow">
+      <enum>QFrame::Sunken</enum>
+     </property>
+     <property name="minimumHeight">
+      <number>20</number>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
  </widget>
  <resources/>
  <connections/>

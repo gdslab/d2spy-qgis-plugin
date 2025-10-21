@@ -26,7 +26,7 @@ from qgis.gui import QgsMessageBar
 
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QDialogButtonBox, QListWidgetItem, QSizePolicy
+from qgis.PyQt.QtWidgets import QAction, QDialogButtonBox, QListWidgetItem, QSizePolicy, QApplication
 
 # Initialize Qt resources from file resources.py
 from .resources import *
@@ -34,22 +34,16 @@ from .resources import *
 # Import the code for the dialog
 from .d2s_browser_dialog import D2SBrowserDialog
 import os.path
+import sys
 
+# Add bundled libs to Python path BEFORE importing dependencies
+libs_path = os.path.join(os.path.dirname(__file__), "libs")
+if libs_path not in sys.path:
+    sys.path.insert(0, libs_path)
 
-# Install d2spy pkg
-try:
-    from d2spy.auth import Auth
-    from d2spy.workspace import Workspace
-except (ImportError, ModuleNotFoundError):
-    import os
-    import sys
-
-    base_path = os.path.dirname(os.path.realpath(__file__))
-    whl_path = os.path.join(base_path, "d2spy-0.1.1-py3-none-any.whl")
-    sys.path.append(whl_path)
-
-    from d2spy.auth import Auth
-    from d2spy.workspace import Workspace
+# Import d2spy - now available from bundled libs/
+from d2spy.auth import Auth
+from d2spy.workspace import Workspace
 
 
 class D2SBrowser:
@@ -245,8 +239,24 @@ class D2SBrowser:
             # substitute with your code.
             pass
 
+    def set_status(self, message):
+        """Set status bar message."""
+        if hasattr(self.dlg, 'statusBar'):
+            self.dlg.statusBar.setText(message)
+            # Force the UI to update immediately
+            QApplication.processEvents()
+
+    def clear_status(self):
+        """Clear status bar message."""
+        if hasattr(self.dlg, 'statusBar'):
+            self.dlg.statusBar.setText("")
+            QApplication.processEvents()
+
     def login(self):
         """Login to D2S instance using server, email, and password collected from UI."""
+        # Show status
+        self.set_status("Logging in...")
+
         # Clear existing projects
         self.dlg.projectsComboBox.clear()
 
@@ -260,6 +270,7 @@ class D2SBrowser:
         session = auth.login(email, password)
 
         if not session:
+            self.clear_status()
             self.iface.messageBar().pushMessage(
                 "Error",
                 "Unable to sign in with provided credentials",
@@ -272,7 +283,11 @@ class D2SBrowser:
         user = auth.get_current_user()
 
         # Check for API key
-        if "api_access_token" not in user or user["api_access_token"] is None:
+        if (
+            not user
+            or not hasattr(user, "api_access_token")
+            or user.api_access_token is None
+        ):
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please request an API key from the D2S profile page.",
@@ -280,7 +295,7 @@ class D2SBrowser:
                 duration=10,
             )
         else:
-            self.api_key = user["api_access_token"]
+            self.api_key = user.api_access_token
 
         # Create a workspace
         workspace = Workspace(server, session)
@@ -291,6 +306,9 @@ class D2SBrowser:
 
     def update_projects(self):
         """Fetch user's projects from D2S instance and update projects UI combobox."""
+        # Show status
+        self.set_status("Loading projects...")
+
         # Clear current projects
         self.dlg.projectsComboBox.clear()
 
@@ -312,9 +330,13 @@ class D2SBrowser:
             self.dlg.projectsComboBox.clear()
             self.dlg.flightsComboBox.clear()
             self.dlg.dataProductsListWidget.clear()
+            self.set_status("No projects found")
 
     def update_flights(self):
         """Fetch flights from selected project and update flights UI combobox."""
+        # Show status
+        self.set_status("Loading flights...")
+
         # Clear current flights
         self.dlg.flightsComboBox.clear()
 
@@ -349,9 +371,13 @@ class D2SBrowser:
             # No flights, clear current flights and data products
             self.dlg.flightsComboBox.clear()
             self.dlg.dataProductsListWidget.clear()
+            self.set_status("No flights found")
 
     def update_data_products(self):
         """Fetch data products from selected flight and update data products UI list."""
+        # Show status
+        self.set_status("Loading data products...")
+
         # Clear current data products
         self.dlg.dataProductsListWidget.clear()
 
@@ -381,18 +407,34 @@ class D2SBrowser:
 
                 # Add data product list item to list widget
                 self.dlg.dataProductsListWidget.addItem(item)
+            self.set_status("Ready")
         else:
             # No data products, clear current data products
             self.dlg.dataProductsListWidget.clear()
+            self.set_status("No data products found")
 
     def add_data_products_to_map(self):
         """Add data products selected in data products UI list to map."""
+        # Show status
+        self.set_status("Adding layers to map...")
+
+        # Get flight for constructing data product layer names
+        selected_flight = self.flights[self.dlg.flightsComboBox.currentIndex()]
+        flight_name = selected_flight.name if selected_flight.name else "Flight"
+        flight_date = selected_flight.acquisition_date
+        flight_sensor = selected_flight.sensor
+        flight_prefix = f"{flight_name}_{flight_date}_{flight_sensor}"
+
+        # Track number of layers added
+        layers_added = 0
+
         # Iterate over each data product and add urls for checked data products in list
         for index in range(self.dlg.dataProductsListWidget.count()):
             item = self.dlg.dataProductsListWidget.item(index)
             if item.checkState() == Qt.Checked:
                 # Get url for data product
-                layer_name = self.data_products[index].data_type
+                data_type = self.data_products[index].data_type
+                layer_name = f"{flight_prefix}_{data_type}"
                 url = self.data_products[index].url
                 # Create raster layer and add to map
                 raster_layer = QgsRasterLayer(
@@ -400,6 +442,7 @@ class D2SBrowser:
                 )
                 if raster_layer.isValid():
                     QgsProject().instance().addMapLayer(raster_layer)
+                    layers_added += 1
                 else:
                     self.iface.messageBar().pushMessage(
                         "Warning",
@@ -411,3 +454,9 @@ class D2SBrowser:
         # Zoom to last added layer
         self.iface.zoomToActiveLayer()
         self.iface.mapCanvas().refresh()
+
+        # Update status
+        if layers_added > 0:
+            self.set_status(f"Added {layers_added} layer{'s' if layers_added > 1 else ''} to map")
+        else:
+            self.set_status("No layers to add")

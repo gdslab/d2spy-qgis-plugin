@@ -1,0 +1,55 @@
+Metadata-Version: 2.3
+Name: d2spy
+Version: 0.3.2
+Summary: Python package for interacting with a Data to Science instance.
+License: MIT
+Keywords: python,data to science,uas
+Author: Ben Hancock
+Author-email: hancocb@purdue.edu
+Requires-Python: >=3.9,<4.0
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Dist: exifread (>=3.0.0,<4.0.0)
+Requires-Dist: geojson-pydantic (>=1.1.1,<2.0.0)
+Requires-Dist: geopandas (>=1.0.1,<2.0.0)
+Requires-Dist: rasterio (>=1.3.11,<2.0.0)
+Requires-Dist: requests (>=2.31.0,<3.0.0)
+Description-Content-Type: text/markdown
+
+# Welcome to Data to Science Python (d2spy)
+
+[![image](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/gdslab/d2spy/blob/master)
+[![Jupyter Notebook](https://img.shields.io/badge/Open%20in%20JuypterHub%20-%20%233776AB?logo=jupyter&logoColor=%23F37626&labelColor=%23F5F5F5)](https://lab.d2s.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+<p align="center">
+  <img
+    src="https://py.d2s.org/assets/d2s-logo.png"
+    alt="Data to Science logo"
+    width="128"
+  >
+</p>
+
+D2spy is a Python package for interacting with Data to Science instances.
+
+## Features
+
+- Sign in to your Data to Science instance
+- Access your projects, flights, and data products
+- Create new projects and flights
+- Upload data products to flights
+
+## Documentation
+
+- [Homepage](https://py.d2s.org/)
+- [Guides](https://py.d2s.org/guides)
+- [API Reference](https://py.d2s.org/api_client/)
+
