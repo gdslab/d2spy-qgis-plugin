@@ -21,18 +21,11 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer
-from qgis.gui import QgsMessageBar
+from qgis.core import Qgis, QgsProject, QgsRasterLayer
 
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QThread
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import (
-    QAction,
-    QDialogButtonBox,
-    QListWidgetItem,
-    QSizePolicy,
-    QApplication,
-)
+from qgis.PyQt.QtWidgets import QAction, QListWidgetItem, QApplication
 
 # Initialize Qt resources from file resources.py
 from .resources import *
@@ -45,12 +38,13 @@ from .d2s_browser_workers import ProjectsWorker, FlightsWorker, DataProductsWork
 import os.path
 import sys
 
-# Add bundled libs to Python path BEFORE importing dependencies
-libs_path = os.path.join(os.path.dirname(__file__), "libs")
-if libs_path not in sys.path:
-    sys.path.insert(0, libs_path)
+# Add bundled libraries to sys.path
+plugin_dir = os.path.dirname(__file__)
+libs_dir = os.path.join(plugin_dir, "libs")
+if libs_dir not in sys.path:
+    sys.path.insert(0, libs_dir)
 
-# Import d2spy - now available from bundled libs/
+# Import d2spy from bundled libraries
 from d2spy.auth import Auth
 from d2spy.workspace import Workspace
 
