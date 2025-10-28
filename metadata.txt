@@ -6,9 +6,10 @@
 name=D2S Browser
 qgisMinimumVersion=3.0
 description=This plugin allows you to browse your data on a D2S instance.
-version=0.4
+version=0.4.1
 author=Ben Hancock
 email=hancocb@purdue.edu
+contributors=Jinha Jung, Minyoung Jung
 
 about=This plugin will allow you to sign in to a Data to Science instance. Once authenticated, you will be able to browse and view your projects, flights, and data products.
 
