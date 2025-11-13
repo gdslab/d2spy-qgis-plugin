@@ -78,3 +78,25 @@ class DataProductsWorker(QObject):
             self.finished.emit(data_products.collection)
         except Exception as e:
             self.error.emit(str(e))
+
+
+class VectorLayersWorker(QObject):
+    """Worker to fetch vector layers for a project in a background thread."""
+    finished = pyqtSignal(list)  # Emits list of vector layers
+    error = pyqtSignal(str)  # Emits error message
+
+    def __init__(self, workspace, project_id):
+        super().__init__()
+        self.workspace = workspace
+        self.project_id = project_id
+
+    def run(self):
+        """Fetch vector layers from project."""
+        try:
+            url = f"{self.workspace.base_url}/api/v1/projects/{self.project_id}/vector_layers"
+            response = self.workspace.session.get(url)
+            response.raise_for_status()
+            layers = response.json()
+            self.finished.emit(layers)
+        except Exception as e:
+            self.error.emit(str(e))

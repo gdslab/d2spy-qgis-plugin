@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>600</width>
-    <height>340</height>
+    <height>500</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -17,23 +17,48 @@
    <item>
     <layout class="QGridLayout" name="gridLayout">
     <item row="0" column="1" rowspan="3">
-     <layout class="QVBoxLayout" name="dataProductsVerticalLayout">
+     <layout class="QVBoxLayout" name="rightColumnLayout">
       <item>
-       <widget class="QLabel" name="dataProductsLabel">
-        <property name="text">
-         <string>Data Products:</string>
-        </property>
-       </widget>
+       <layout class="QVBoxLayout" name="dataProductsVerticalLayout">
+        <item>
+         <widget class="QLabel" name="dataProductsLabel">
+          <property name="text">
+           <string>Data Products:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QListWidget" name="dataProductsListWidget"/>
+        </item>
+        <item>
+         <widget class="QPushButton" name="dataProductsPushButton">
+          <property name="text">
+           <string>Add Selected to Map</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
       <item>
-       <widget class="QListWidget" name="dataProductsListWidget"/>
-      </item>
-      <item>
-       <widget class="QPushButton" name="dataProductsPushButton">
-        <property name="text">
-         <string>Add Selected to Map</string>
-        </property>
-       </widget>
+       <layout class="QVBoxLayout" name="mapLayersVerticalLayout">
+        <item>
+         <widget class="QLabel" name="mapLayersLabel">
+          <property name="text">
+           <string>Map Layers:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QListWidget" name="mapLayersListWidget"/>
+        </item>
+        <item>
+         <widget class="QPushButton" name="mapLayersPushButton">
+          <property name="text">
+           <string>Add Selected to Map</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
      </layout>
     </item>

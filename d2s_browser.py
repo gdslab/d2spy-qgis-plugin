@@ -21,7 +21,7 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.core import Qgis, QgsProject, QgsRasterLayer
+from qgis.core import Qgis, QgsProject, QgsRasterLayer, QgsVectorLayer
 
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QThread
 from qgis.PyQt.QtGui import QIcon
@@ -34,7 +34,7 @@ from .resources import *
 from .d2s_browser_dialog import D2SBrowserDialog
 
 # Import worker classes for threaded API calls
-from .d2s_browser_workers import ProjectsWorker, FlightsWorker, DataProductsWorker
+from .d2s_browser_workers import ProjectsWorker, FlightsWorker, DataProductsWorker, VectorLayersWorker
 import os.path
 import sys
 
@@ -101,15 +101,20 @@ class D2SBrowser:
         # Store data products returned from API
         self.data_products = []
 
+        # Store vector layers returned from API
+        self.vector_layers = []
+
         # Store active threads to prevent garbage collection
         self.projects_thread = None
         self.flights_thread = None
         self.data_products_thread = None
+        self.vector_layers_thread = None
 
         # Cache API responses to avoid redundant requests
         self.projects_cache = None
         self.flights_cache = {}  # Key: project_id, Value: list of flights
         self.data_products_cache = {}  # Key: flight_id, Value: list of data products
+        self.vector_layers_cache = {}  # Key: project_id, Value: list of vector layers
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -225,6 +230,9 @@ class D2SBrowser:
         if self.data_products_thread is not None:
             self.data_products_thread.quit()
             self.data_products_thread.wait()
+        if self.vector_layers_thread is not None:
+            self.vector_layers_thread.quit()
+            self.vector_layers_thread.wait()
 
         # Remove UI elements
         for action in self.actions:
@@ -256,6 +264,18 @@ class D2SBrowser:
             self.dlg.dataProductsPushButton.clicked.connect(
                 self.add_data_products_to_map
             )
+            # Event when map layers add to map button clicked
+            self.dlg.mapLayersPushButton.clicked.connect(
+                self.add_map_layers_to_map
+            )
+
+            # Initially hide map layers section until data is loaded
+            if hasattr(self.dlg, "mapLayersLabel"):
+                self.dlg.mapLayersLabel.setVisible(False)
+            if hasattr(self.dlg, "mapLayersListWidget"):
+                self.dlg.mapLayersListWidget.setVisible(False)
+            if hasattr(self.dlg, "mapLayersPushButton"):
+                self.dlg.mapLayersPushButton.setVisible(False)
 
         # show the dialog
         self.dlg.show()
@@ -292,12 +312,17 @@ class D2SBrowser:
             self.dlg.projectsRefreshPushButton.setEnabled(enabled)
         if hasattr(self.dlg, "dataProductsPushButton"):
             self.dlg.dataProductsPushButton.setEnabled(enabled)
+        if hasattr(self.dlg, "mapLayersListWidget"):
+            self.dlg.mapLayersListWidget.setEnabled(enabled)
+        if hasattr(self.dlg, "mapLayersPushButton"):
+            self.dlg.mapLayersPushButton.setEnabled(enabled)
 
     def clear_cache(self):
         """Clear all cached API responses."""
         self.projects_cache = None
         self.flights_cache = {}
         self.data_products_cache = {}
+        self.vector_layers_cache = {}
 
     def login(self):
         """Login to D2S instance using server, email, and password collected from UI."""
@@ -389,6 +414,7 @@ class D2SBrowser:
         self.dlg.projectsComboBox.clear()
         self.dlg.flightsComboBox.clear()
         self.dlg.dataProductsListWidget.clear()
+        self.dlg.mapLayersListWidget.clear()
 
         # Unblock signals
         self.dlg.projectsComboBox.blockSignals(False)
@@ -466,10 +492,18 @@ class D2SBrowser:
             # Get user flights for first project
             self.update_flights()
         else:
-            # No projects, clear current projects, flights, and data products
+            # No projects, clear current projects, flights, data products, and map layers
             self.dlg.projectsComboBox.clear()
             self.dlg.flightsComboBox.clear()
             self.dlg.dataProductsListWidget.clear()
+            self.dlg.mapLayersListWidget.clear()
+            # Hide map layers section
+            if hasattr(self.dlg, "mapLayersLabel"):
+                self.dlg.mapLayersLabel.setVisible(False)
+            if hasattr(self.dlg, "mapLayersListWidget"):
+                self.dlg.mapLayersListWidget.setVisible(False)
+            if hasattr(self.dlg, "mapLayersPushButton"):
+                self.dlg.mapLayersPushButton.setVisible(False)
             self.set_status("No projects found")
             # Re-enable UI
             self.set_ui_enabled(True)
@@ -497,6 +531,9 @@ class D2SBrowser:
 
         # Currently selected project
         selected_project = self.projects[self.dlg.projectsComboBox.currentIndex()]
+
+        # Also update map layers for this project
+        self.update_map_layers(use_cache=use_cache)
 
         # Check cache first
         if use_cache and selected_project.id in self.flights_cache:
@@ -724,3 +761,163 @@ class D2SBrowser:
             )
         else:
             self.set_status("No layers to add")
+
+    def update_map_layers(self, use_cache=True):
+        """Fetch vector layers from selected project and update map layers UI list.
+
+        Args:
+            use_cache (bool): If True, use cached data if available. Defaults to True.
+        """
+        # Clear current map layers
+        self.dlg.mapLayersListWidget.clear()
+
+        # Currently selected project
+        selected_project = self.projects[self.dlg.projectsComboBox.currentIndex()]
+
+        # Check cache first
+        if use_cache and selected_project.id in self.vector_layers_cache:
+            # Use cached data
+            self.on_map_layers_loaded(self.vector_layers_cache[selected_project.id])
+            return
+
+        # Show status
+        self.set_status("Loading map layers...")
+
+        # Disable UI during API call
+        self.set_ui_enabled(False)
+
+        # Clean up existing thread if any
+        if self.vector_layers_thread is not None:
+            self.vector_layers_thread.quit()
+            self.vector_layers_thread.wait()
+
+        # Create worker and thread
+        self.vector_layers_thread = QThread()
+        self.vector_layers_worker = VectorLayersWorker(self.workspace, selected_project.id)
+        self.vector_layers_worker.moveToThread(self.vector_layers_thread)
+
+        # Connect signals
+        self.vector_layers_thread.started.connect(self.vector_layers_worker.run)
+        self.vector_layers_worker.finished.connect(self.on_map_layers_loaded)
+        self.vector_layers_worker.error.connect(self.on_map_layers_error)
+        self.vector_layers_worker.finished.connect(self.vector_layers_thread.quit)
+        self.vector_layers_worker.error.connect(self.vector_layers_thread.quit)
+
+        # Start thread
+        self.vector_layers_thread.start()
+
+    def on_map_layers_loaded(self, layers):
+        """Handle successful vector layers load."""
+        # Cache the vector layers for this project
+        selected_project = self.projects[self.dlg.projectsComboBox.currentIndex()]
+        self.vector_layers_cache[selected_project.id] = layers
+
+        self.vector_layers = layers
+
+        # Check if there are any layers
+        if len(self.vector_layers) > 0:
+            # Show map layers section
+            if hasattr(self.dlg, "mapLayersLabel"):
+                self.dlg.mapLayersLabel.setVisible(True)
+            if hasattr(self.dlg, "mapLayersListWidget"):
+                self.dlg.mapLayersListWidget.setVisible(True)
+            if hasattr(self.dlg, "mapLayersPushButton"):
+                self.dlg.mapLayersPushButton.setVisible(True)
+
+            # Create list item for each vector layer
+            for layer in self.vector_layers:
+                # Add layer to list with unchecked checkbox
+                item = QListWidgetItem(layer.get("layer_name", "Unknown"))
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+
+                # Add layer list item to list widget
+                self.dlg.mapLayersListWidget.addItem(item)
+
+            self.set_status("Ready")
+        else:
+            # No map layers, hide the section
+            if hasattr(self.dlg, "mapLayersLabel"):
+                self.dlg.mapLayersLabel.setVisible(False)
+            if hasattr(self.dlg, "mapLayersListWidget"):
+                self.dlg.mapLayersListWidget.setVisible(False)
+            if hasattr(self.dlg, "mapLayersPushButton"):
+                self.dlg.mapLayersPushButton.setVisible(False)
+
+        # Re-enable UI
+        self.set_ui_enabled(True)
+
+    def on_map_layers_error(self, error_message):
+        """Handle vector layers load error."""
+        self.clear_status()
+        self.iface.messageBar().pushMessage(
+            "Error",
+            f"Failed to load map layers: {error_message}",
+            level=Qgis.Critical,
+            duration=10,
+        )
+        # Hide map layers section on error
+        if hasattr(self.dlg, "mapLayersLabel"):
+            self.dlg.mapLayersLabel.setVisible(False)
+        if hasattr(self.dlg, "mapLayersListWidget"):
+            self.dlg.mapLayersListWidget.setVisible(False)
+        if hasattr(self.dlg, "mapLayersPushButton"):
+            self.dlg.mapLayersPushButton.setVisible(False)
+        # Re-enable UI
+        self.set_ui_enabled(True)
+
+    def add_map_layers_to_map(self):
+        """Add vector layers selected in map layers UI list to map."""
+        # Show status
+        self.set_status("Adding vector layers to map...")
+
+        # Get project for constructing layer URLs
+        selected_project = self.projects[self.dlg.projectsComboBox.currentIndex()]
+        project_title = selected_project.title
+        project_id = selected_project.id
+
+        # Track number of layers added
+        layers_added = 0
+
+        # Iterate over each vector layer and add URLs for checked layers in list
+        for index in range(self.dlg.mapLayersListWidget.count()):
+            item = self.dlg.mapLayersListWidget.item(index)
+            if item.checkState() == Qt.Checked:
+                # Get layer info
+                layer_data = self.vector_layers[index]
+                layer_name = layer_data.get("layer_name", "Unknown")
+                layer_id = layer_data.get("layer_id")
+
+                # Construct FlatGeobuf URL with API key for authentication
+                fgb_url = f"{self.workspace.base_url}/static/projects/{project_id}/vector/{layer_id}/{layer_id}.fgb?API_KEY={self.api_key}"
+
+                # Create layer name for QGIS
+                qgis_layer_name = f"{project_title}_{layer_name}"
+
+                # Create vector layer and add to map
+                vector_layer = QgsVectorLayer(
+                    f"/vsicurl/{fgb_url}", qgis_layer_name, "ogr"
+                )
+                if vector_layer.isValid():
+                    QgsProject().instance().addMapLayer(vector_layer)
+                    layers_added += 1
+                else:
+                    self.iface.messageBar().pushMessage(
+                        "Warning",
+                        f"Failed to load layer: {layer_name}",
+                        level=Qgis.Warning,
+                        duration=5,
+                    )
+
+        # Zoom to last added layer
+        if layers_added > 0:
+            self.iface.zoomToActiveLayer()
+            self.iface.mapCanvas().refresh()
+
+        # Update status
+        if layers_added > 0:
+            self.set_status(
+                f"Added {layers_added} vector layer{'s' if layers_added > 1 else ''} to map"
+            )
+        else:
+            self.set_status("No vector layers to add")
