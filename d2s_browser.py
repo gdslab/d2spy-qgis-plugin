@@ -21,11 +21,14 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.core import Qgis, QgsProject, QgsRasterLayer, QgsVectorLayer
+from qgis.core import Qgis, QgsProject, QgsRasterLayer, QgsVectorLayer, QgsJsonExporter, QgsWkbTypes
 
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QThread
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QListWidgetItem, QApplication
+from qgis.PyQt.QtWidgets import QAction, QListWidgetItem, QApplication, QFileDialog
+
+from datetime import date
+import json
 
 # Initialize Qt resources from file resources.py
 from .resources import *
@@ -34,7 +37,7 @@ from .resources import *
 from .d2s_browser_dialog import D2SBrowserDialog
 
 # Import worker classes for threaded API calls
-from .d2s_browser_workers import ProjectsWorker, FlightsWorker, DataProductsWorker, VectorLayersWorker
+from .d2s_browser_workers import ProjectsWorker, FlightsWorker, DataProductsWorker, VectorLayersWorker, DataProductUploadWorker
 import os.path
 import sys
 
@@ -109,12 +112,17 @@ class D2SBrowser:
         self.flights_thread = None
         self.data_products_thread = None
         self.vector_layers_thread = None
+        self.upload_thread = None
 
         # Cache API responses to avoid redundant requests
         self.projects_cache = None
         self.flights_cache = {}  # Key: project_id, Value: list of flights
         self.data_products_cache = {}  # Key: flight_id, Value: list of data products
         self.vector_layers_cache = {}  # Key: project_id, Value: list of vector layers
+
+        # State management for Create tab workflow
+        self.selected_project = None  # Currently selected project for Create tab
+        self.selected_flight = None  # Currently selected flight for Create tab
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -233,6 +241,9 @@ class D2SBrowser:
         if self.vector_layers_thread is not None:
             self.vector_layers_thread.quit()
             self.vector_layers_thread.wait()
+        if self.upload_thread is not None:
+            self.upload_thread.quit()
+            self.upload_thread.wait()
 
         # Remove UI elements
         for action in self.actions:
@@ -268,6 +279,49 @@ class D2SBrowser:
             self.dlg.mapLayersPushButton.clicked.connect(
                 self.add_map_layers_to_map
             )
+
+            # CREATE TAB EVENTS
+
+            # Project column events
+            self.dlg.selectProjectPushButton.clicked.connect(self.on_select_project)
+            self.dlg.createProjectPushButton.clicked.connect(self.on_create_project)
+            self.dlg.projectBoundaryFileBrowseButton.clicked.connect(self.browse_project_boundary_file)
+            self.dlg.projectBoundaryFileRadio.toggled.connect(self.toggle_project_boundary_source)
+            self.dlg.projectBoundaryCanvasRadio.toggled.connect(self.toggle_project_boundary_source)
+            self.dlg.startDateCheckBox.toggled.connect(
+                lambda checked: self.dlg.startDateEdit.setEnabled(checked)
+            )
+            self.dlg.endDateCheckBox.toggled.connect(
+                lambda checked: self.dlg.endDateEdit.setEnabled(checked)
+            )
+
+            # Flight column events
+            self.dlg.selectFlightPushButton.clicked.connect(self.on_select_flight)
+            self.dlg.createFlightPushButton.clicked.connect(self.on_create_flight)
+            self.dlg.platformComboBox.currentTextChanged.connect(self.on_platform_changed)
+
+            # Data Product column events
+            self.dlg.rasterFileBrowseButton.clicked.connect(self.browse_raster_file)
+            self.dlg.rasterFileRadio.toggled.connect(self.toggle_raster_source)
+            self.dlg.rasterCanvasRadio.toggled.connect(self.toggle_raster_source)
+            self.dlg.rasterLayerComboBox.currentIndexChanged.connect(
+                lambda: self.dlg.rasterUploadProgressBar.setValue(0)
+            )
+            self.dlg.dataTypeComboBox.currentTextChanged.connect(self.on_data_type_changed)
+            self.dlg.uploadRasterPushButton.clicked.connect(self.on_upload_raster)
+
+            # Map Layer column events
+            self.dlg.vectorFileBrowseButton.clicked.connect(self.browse_vector_file)
+            self.dlg.vectorFileRadio.toggled.connect(self.toggle_vector_source)
+            self.dlg.vectorCanvasRadio.toggled.connect(self.toggle_vector_source)
+            self.dlg.uploadVectorPushButton.clicked.connect(self.on_upload_vector)
+
+            # Set default dates to today for Create tab
+            from qgis.PyQt.QtCore import QDate
+            today = QDate.currentDate()
+            self.dlg.acquisitionDateEdit.setDate(today)
+            self.dlg.startDateEdit.setDate(today)
+            self.dlg.endDateEdit.setDate(today)
 
             # Initially hide map layers section until data is loaded
             if hasattr(self.dlg, "mapLayersLabel"):
@@ -489,6 +543,8 @@ class D2SBrowser:
             )
             # Unblock signals
             self.dlg.projectsComboBox.blockSignals(False)
+            # Populate Create tab projects combobox
+            self.populate_create_projects()
             # Get user flights for first project
             self.update_flights()
         else:
@@ -921,3 +977,787 @@ class D2SBrowser:
             )
         else:
             self.set_status("No vector layers to add")
+
+    # ========== CREATE TAB METHODS ==========
+
+    # ----- Helper Methods -----
+
+    def populate_create_projects(self):
+        """Populate the create tab projects combobox with ALL available projects (not just those with rasters)."""
+        if not self.workspace:
+            return
+
+        try:
+            # Fetch ALL projects (has_raster=False gets all projects)
+            all_projects = self.workspace.get_projects(has_raster=False)
+            self.dlg.createProjectsComboBox.clear()
+
+            # Sort and populate
+            sorted_projects = sorted(all_projects.collection, key=lambda p: p.title.lower())
+            for project in sorted_projects:
+                self.dlg.createProjectsComboBox.addItem(project.title, project)
+        except Exception as e:
+            # Silently fail - this is not critical
+            pass
+
+    def populate_create_flights(self, project):
+        """Populate the create tab flights combobox for a given project."""
+        self.dlg.createFlightsComboBox.clear()
+        if project:
+            flights = project.get_flights()
+            for flight in flights.collection:
+                display_name = flight.name if flight.name else f"Flight {flight.acquisition_date}"
+                self.dlg.createFlightsComboBox.addItem(display_name, flight)
+
+    def populate_polygon_layers(self):
+        """Populate combobox with polygon vector layers from map canvas."""
+        self.dlg.projectBoundaryLayerComboBox.clear()
+        layers = QgsProject.instance().mapLayers().values()
+        for layer in layers:
+            if isinstance(layer, QgsVectorLayer) and layer.geometryType() == QgsWkbTypes.PolygonGeometry:
+                self.dlg.projectBoundaryLayerComboBox.addItem(layer.name(), layer)
+
+    def populate_vector_layers(self):
+        """Populate combobox with vector layers from map canvas."""
+        self.dlg.vectorLayerComboBox.clear()
+        layers = QgsProject.instance().mapLayers().values()
+        for layer in layers:
+            if isinstance(layer, QgsVectorLayer):
+                self.dlg.vectorLayerComboBox.addItem(layer.name(), layer)
+
+    def populate_raster_layers(self):
+        """Populate combobox with raster layers from map canvas."""
+        self.dlg.rasterLayerComboBox.clear()
+        layers = QgsProject.instance().mapLayers().values()
+        for layer in layers:
+            if isinstance(layer, QgsRasterLayer):
+                self.dlg.rasterLayerComboBox.addItem(layer.name(), layer)
+
+    def vector_layer_to_geojson_feature(self, layer):
+        """Convert first feature of a QGIS vector layer to GeoJSON Feature (for project boundary).
+
+        Args:
+            layer: QgsVectorLayer to convert
+
+        Returns:
+            dict: GeoJSON Feature dict or None on error
+        """
+        try:
+            # Get first feature
+            features = list(layer.getFeatures())
+            if not features:
+                return None
+
+            feature = features[0]
+
+            # Export to GeoJSON
+            exporter = QgsJsonExporter(layer)
+            geojson_str = exporter.exportFeature(feature)
+            geojson_dict = json.loads(geojson_str)
+
+            # D2S API expects Polygon geometry only, not MultiPolygon
+            # Convert MultiPolygon to Polygon by taking the first polygon
+            if geojson_dict.get("geometry", {}).get("type") == "MultiPolygon":
+                coordinates = geojson_dict["geometry"]["coordinates"]
+                if coordinates and len(coordinates) > 0:
+                    # Take the first polygon from the MultiPolygon
+                    geojson_dict["geometry"]["type"] = "Polygon"
+                    geojson_dict["geometry"]["coordinates"] = coordinates[0]
+
+                    self.iface.messageBar().pushMessage(
+                        "Info",
+                        "MultiPolygon detected. Using first polygon as project boundary.",
+                        level=Qgis.Info,
+                        duration=5,
+                    )
+
+            return geojson_dict
+        except Exception as e:
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Failed to convert layer to GeoJSON: {str(e)}",
+                level=Qgis.Critical,
+                duration=10,
+            )
+            return None
+
+    def vector_layer_to_geojson_feature_collection(self, layer):
+        """Convert entire QGIS vector layer to GeoJSON FeatureCollection (for map layers).
+
+        Args:
+            layer: QgsVectorLayer to convert
+
+        Returns:
+            dict: GeoJSON FeatureCollection dict or None on error
+        """
+        try:
+            # Export entire layer to GeoJSON
+            exporter = QgsJsonExporter(layer)
+            geojson_str = exporter.exportFeatures(layer.getFeatures())
+            geojson_dict = json.loads(geojson_str)
+
+            return geojson_dict
+        except Exception as e:
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Failed to convert layer to GeoJSON: {str(e)}",
+                level=Qgis.Critical,
+                duration=10,
+            )
+            return None
+
+    def vector_file_to_geojson(self, filepath, as_feature_collection=True):
+        """Load vector file and convert to GeoJSON.
+
+        Args:
+            filepath: Path to vector file
+            as_feature_collection: If True, return FeatureCollection; if False, return first Feature
+
+        Returns:
+            dict: GeoJSON dict or None on error
+        """
+        try:
+            # Load vector file as temporary layer
+            layer = QgsVectorLayer(filepath, "temp", "ogr")
+            if not layer.isValid():
+                self.iface.messageBar().pushMessage(
+                    "Error",
+                    f"Failed to load vector file: {filepath}",
+                    level=Qgis.Critical,
+                    duration=10,
+                )
+                return None
+
+            if as_feature_collection:
+                return self.vector_layer_to_geojson_feature_collection(layer)
+            else:
+                return self.vector_layer_to_geojson_feature(layer)
+        except Exception as e:
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Failed to process vector file: {str(e)}",
+                level=Qgis.Critical,
+                duration=10,
+            )
+            return None
+
+    # ----- UI Toggle Methods -----
+
+    def on_data_type_changed(self, text):
+        """Enable/disable custom data type input based on combobox selection."""
+        self.dlg.dataTypeCustomLineEdit.setEnabled(text == "other")
+        if text != "other":
+            # Clear the custom input when switching away from "other"
+            self.dlg.dataTypeCustomLineEdit.clear()
+
+    def on_platform_changed(self, text):
+        """Enable/disable custom platform input based on combobox selection."""
+        self.dlg.platformCustomLineEdit.setEnabled(text == "Other")
+        if text != "Other":
+            # Clear the custom input when switching away from "Other"
+            self.dlg.platformCustomLineEdit.clear()
+
+    def toggle_project_boundary_source(self):
+        """Toggle between file and canvas source for project boundary."""
+        if self.dlg.projectBoundaryFileRadio.isChecked():
+            self.dlg.projectBoundaryFileLineEdit.setEnabled(True)
+            self.dlg.projectBoundaryFileBrowseButton.setEnabled(True)
+            self.dlg.projectBoundaryLayerComboBox.setEnabled(False)
+        else:
+            self.dlg.projectBoundaryFileLineEdit.setEnabled(False)
+            self.dlg.projectBoundaryFileBrowseButton.setEnabled(False)
+            self.dlg.projectBoundaryLayerComboBox.setEnabled(True)
+            self.populate_polygon_layers()
+
+    def toggle_raster_source(self):
+        """Toggle between file and canvas source for raster."""
+        # Reset progress bar when source changes
+        self.dlg.rasterUploadProgressBar.setValue(0)
+
+        if self.dlg.rasterFileRadio.isChecked():
+            self.dlg.rasterFileLineEdit.setEnabled(True)
+            self.dlg.rasterFileBrowseButton.setEnabled(True)
+            self.dlg.rasterLayerComboBox.setEnabled(False)
+        else:
+            self.dlg.rasterFileLineEdit.setEnabled(False)
+            self.dlg.rasterFileBrowseButton.setEnabled(False)
+            self.dlg.rasterLayerComboBox.setEnabled(True)
+            self.populate_raster_layers()
+
+    def toggle_vector_source(self):
+        """Toggle between file and canvas source for vector."""
+        if self.dlg.vectorFileRadio.isChecked():
+            self.dlg.vectorFileLineEdit.setEnabled(True)
+            self.dlg.vectorFileBrowseButton.setEnabled(True)
+            self.dlg.vectorLayerComboBox.setEnabled(False)
+        else:
+            self.dlg.vectorFileLineEdit.setEnabled(False)
+            self.dlg.vectorFileBrowseButton.setEnabled(False)
+            self.dlg.vectorLayerComboBox.setEnabled(True)
+            self.populate_vector_layers()
+
+    # ----- File Browser Methods -----
+
+    def browse_project_boundary_file(self):
+        """Open file dialog to select project boundary file."""
+        filepath, _ = QFileDialog.getOpenFileName(
+            self.dlg,
+            "Select Project Boundary File",
+            "",
+            "Vector Files (*.shp *.geojson *.gpkg *.kml *.zip);;All Files (*)",
+        )
+        if filepath:
+            self.dlg.projectBoundaryFileLineEdit.setText(filepath)
+
+    def browse_raster_file(self):
+        """Open file dialog to select raster file."""
+        filepath, _ = QFileDialog.getOpenFileName(
+            self.dlg,
+            "Select Raster File",
+            "",
+            "Raster Files (*.tif *.tiff *.las *.laz);;All Files (*)",
+        )
+        if filepath:
+            self.dlg.rasterFileLineEdit.setText(filepath)
+            # Reset progress bar when new file is selected
+            self.dlg.rasterUploadProgressBar.setValue(0)
+
+    def browse_vector_file(self):
+        """Open file dialog to select vector file."""
+        filepath, _ = QFileDialog.getOpenFileName(
+            self.dlg,
+            "Select Vector File",
+            "",
+            "Vector Files (*.shp *.geojson *.gpkg *.kml);;All Files (*)",
+        )
+        if filepath:
+            self.dlg.vectorFileLineEdit.setText(filepath)
+
+    # ----- Project Methods -----
+
+    def on_select_project(self):
+        """Handle project selection from dropdown."""
+        if not self.workspace:
+            self.iface.messageBar().pushMessage(
+                "Warning",
+                "Please log in first",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        index = self.dlg.createProjectsComboBox.currentIndex()
+        if index < 0:
+            return
+
+        self.selected_project = self.dlg.createProjectsComboBox.itemData(index)
+        self.dlg.projectStatusLabel.setText(f"Selected: {self.selected_project.title}")
+
+        # Enable Flight and Map Layer columns
+        self.dlg.flightGroupBox.setEnabled(True)
+        self.dlg.mapLayerGroupBox.setEnabled(True)
+
+        # Populate flights for selected project
+        self.populate_create_flights(self.selected_project)
+
+        # Reset flight selection and forms
+        self.selected_flight = None
+        self.dlg.flightStatusLabel.setText("No flight selected")
+        self.dlg.dataProductGroupBox.setEnabled(False)
+
+        # Clear Create Flight form
+        self.dlg.flightNameLineEdit.clear()
+        self.dlg.altitudeSpinBox.setValue(0)
+        self.dlg.sideOverlapSpinBox.setValue(0)
+        self.dlg.forwardOverlapSpinBox.setValue(0)
+        from qgis.PyQt.QtCore import QDate
+        self.dlg.acquisitionDateEdit.setDate(QDate.currentDate())
+
+        # Clear Data Product form
+        self.dlg.rasterFileLineEdit.clear()
+        self.dlg.rasterUploadProgressBar.setValue(0)
+        self.dlg.dataTypeComboBox.setCurrentIndex(0)
+
+        # Clear Map Layer form
+        self.dlg.vectorLayerNameLineEdit.clear()
+        self.dlg.vectorFileLineEdit.clear()
+
+        self.set_status(f"Project selected: {self.selected_project.title}")
+
+    def on_create_project(self):
+        """Handle project creation."""
+        if not self.workspace:
+            self.iface.messageBar().pushMessage(
+                "Warning",
+                "Please log in first",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        # Validate inputs
+        title = self.dlg.projectTitleLineEdit.text().strip()
+        description = self.dlg.projectDescriptionTextEdit.toPlainText().strip()
+
+        if not title:
+            self.iface.messageBar().pushMessage(
+                "Warning",
+                "Please enter a project title",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        if not description:
+            self.iface.messageBar().pushMessage(
+                "Warning",
+                "Please enter a project description",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        # Get project boundary GeoJSON
+        location = None
+        if self.dlg.projectBoundaryFileRadio.isChecked():
+            filepath = self.dlg.projectBoundaryFileLineEdit.text().strip()
+            if not filepath:
+                self.iface.messageBar().pushMessage(
+                    "Warning",
+                    "Please select a project boundary file",
+                    level=Qgis.Warning,
+                    duration=5,
+                )
+                return
+            location = self.vector_file_to_geojson(filepath, as_feature_collection=False)
+        else:
+            index = self.dlg.projectBoundaryLayerComboBox.currentIndex()
+            if index < 0:
+                self.iface.messageBar().pushMessage(
+                    "Warning",
+                    "Please select a project boundary layer",
+                    level=Qgis.Warning,
+                    duration=5,
+                )
+                return
+            layer = self.dlg.projectBoundaryLayerComboBox.itemData(index)
+            location = self.vector_layer_to_geojson_feature(layer)
+
+        if not location:
+            return
+
+        # Get optional dates
+        start_date = None
+        end_date = None
+        if self.dlg.startDateCheckBox.isChecked():
+            qt_date = self.dlg.startDateEdit.date()
+            start_date = date(qt_date.year(), qt_date.month(), qt_date.day())
+        if self.dlg.endDateCheckBox.isChecked():
+            qt_date = self.dlg.endDateEdit.date()
+            end_date = date(qt_date.year(), qt_date.month(), qt_date.day())
+
+        # Create project
+        self.set_status("Creating project...")
+        try:
+            new_project = self.workspace.add_project(
+                title=title,
+                description=description,
+                location=location,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+            # Update projects list
+            self.projects.append(new_project)
+            self.selected_project = new_project
+
+            # Update UI
+            self.dlg.projectStatusLabel.setText(f"Created: {new_project.title}")
+            self.populate_create_projects()
+
+            # Set the combobox to show the newly created project
+            for i in range(self.dlg.createProjectsComboBox.count()):
+                if self.dlg.createProjectsComboBox.itemData(i) == new_project:
+                    self.dlg.createProjectsComboBox.setCurrentIndex(i)
+                    break
+
+            # Enable Flight and Map Layer columns
+            self.dlg.flightGroupBox.setEnabled(True)
+            self.dlg.mapLayerGroupBox.setEnabled(True)
+
+            # Populate flights (empty for new project)
+            self.populate_create_flights(self.selected_project)
+
+            # Reset flight selection
+            self.selected_flight = None
+            self.dlg.flightStatusLabel.setText("No flight selected")
+            self.dlg.dataProductGroupBox.setEnabled(False)
+
+            # Clear form
+            self.dlg.projectTitleLineEdit.clear()
+            self.dlg.projectDescriptionTextEdit.clear()
+            self.dlg.projectBoundaryFileLineEdit.clear()
+
+            self.iface.messageBar().pushMessage(
+                "Success",
+                f"Project '{title}' created successfully",
+                level=Qgis.Success,
+                duration=5,
+            )
+            self.set_status(f"Project created: {new_project.title}")
+
+        except Exception as e:
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Failed to create project: {str(e)}",
+                level=Qgis.Critical,
+                duration=10,
+            )
+            self.clear_status()
+
+    # ----- Flight Methods -----
+
+    def on_select_flight(self):
+        """Handle flight selection from dropdown."""
+        if not self.selected_project:
+            self.iface.messageBar().pushMessage(
+                "Warning",
+                "Please select or create a project first",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        index = self.dlg.createFlightsComboBox.currentIndex()
+        if index < 0:
+            return
+
+        self.selected_flight = self.dlg.createFlightsComboBox.itemData(index)
+        display_name = self.selected_flight.name if self.selected_flight.name else f"Flight {self.selected_flight.acquisition_date}"
+        self.dlg.flightStatusLabel.setText(f"Selected: {display_name}")
+
+        # Enable Data Product column
+        self.dlg.dataProductGroupBox.setEnabled(True)
+
+        # Clear Data Product form
+        self.dlg.rasterFileLineEdit.clear()
+        self.dlg.rasterUploadProgressBar.setValue(0)
+        self.dlg.dataTypeComboBox.setCurrentIndex(0)
+
+        self.set_status(f"Flight selected: {display_name}")
+
+    def on_create_flight(self):
+        """Handle flight creation."""
+        if not self.selected_project:
+            self.iface.messageBar().pushMessage(
+                "Warning",
+                "Please select or create a project first",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        # Get inputs
+        name = self.dlg.flightNameLineEdit.text().strip() or None
+        qt_date = self.dlg.acquisitionDateEdit.date()
+        acquisition_date = date(qt_date.year(), qt_date.month(), qt_date.day())
+        altitude = self.dlg.altitudeSpinBox.value()
+        side_overlap = self.dlg.sideOverlapSpinBox.value()
+        forward_overlap = self.dlg.forwardOverlapSpinBox.value()
+        sensor = self.dlg.sensorComboBox.currentText()
+
+        # Get platform (use custom value if "Other" is selected)
+        platform_selection = self.dlg.platformComboBox.currentText()
+        if platform_selection == "Other":
+            platform = self.dlg.platformCustomLineEdit.text().strip()
+            if not platform:
+                self.iface.messageBar().pushMessage(
+                    "Warning",
+                    "Please enter a custom platform",
+                    level=Qgis.Warning,
+                    duration=5,
+                )
+                return
+        else:
+            platform = platform_selection
+
+        # Validate
+        if altitude <= 0:
+            self.iface.messageBar().pushMessage(
+                "Warning",
+                "Please enter a valid altitude",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        # Create flight
+        self.set_status("Creating flight...")
+        try:
+            new_flight = self.selected_project.add_flight(
+                name=name,
+                acquisition_date=acquisition_date,
+                altitude=altitude,
+                side_overlap=side_overlap,
+                forward_overlap=forward_overlap,
+                sensor=sensor,
+                platform=platform,
+            )
+
+            self.selected_flight = new_flight
+            display_name = new_flight.name if new_flight.name else f"Flight {new_flight.acquisition_date}"
+
+            # Update UI
+            self.dlg.flightStatusLabel.setText(f"Created: {display_name}")
+            self.populate_create_flights(self.selected_project)
+
+            # Set the combobox to show the newly created flight
+            for i in range(self.dlg.createFlightsComboBox.count()):
+                if self.dlg.createFlightsComboBox.itemData(i) == new_flight:
+                    self.dlg.createFlightsComboBox.setCurrentIndex(i)
+                    break
+
+            # Enable Data Product column
+            self.dlg.dataProductGroupBox.setEnabled(True)
+
+            # Clear form
+            self.dlg.flightNameLineEdit.clear()
+            self.dlg.altitudeSpinBox.setValue(0)
+            self.dlg.sideOverlapSpinBox.setValue(0)
+            self.dlg.forwardOverlapSpinBox.setValue(0)
+
+            self.iface.messageBar().pushMessage(
+                "Success",
+                f"Flight '{display_name}' created successfully",
+                level=Qgis.Success,
+                duration=5,
+            )
+            self.set_status(f"Flight created: {display_name}")
+
+        except Exception as e:
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Failed to create flight: {str(e)}",
+                level=Qgis.Critical,
+                duration=10,
+            )
+            self.clear_status()
+
+    # ----- Raster Upload Methods -----
+
+    def on_upload_raster(self):
+        """Handle raster upload."""
+        if not self.selected_flight:
+            self.iface.messageBar().pushMessage(
+                "Warning",
+                "Please select or create a flight first",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        # Get raster file path
+        filepath = None
+        if self.dlg.rasterFileRadio.isChecked():
+            filepath = self.dlg.rasterFileLineEdit.text().strip()
+            if not filepath:
+                self.iface.messageBar().pushMessage(
+                    "Warning",
+                    "Please select a raster file",
+                    level=Qgis.Warning,
+                    duration=5,
+                )
+                return
+        else:
+            index = self.dlg.rasterLayerComboBox.currentIndex()
+            if index < 0:
+                self.iface.messageBar().pushMessage(
+                    "Warning",
+                    "Please select a raster layer",
+                    level=Qgis.Warning,
+                    duration=5,
+                )
+                return
+            layer = self.dlg.rasterLayerComboBox.itemData(index)
+            # Get file path from layer source
+            filepath = layer.source()
+            # Check if it's a file path (not a WMS or other remote source)
+            if not os.path.isfile(filepath):
+                self.iface.messageBar().pushMessage(
+                    "Error",
+                    "Selected layer is not a local file. Please use a file-based raster layer.",
+                    level=Qgis.Critical,
+                    duration=10,
+                )
+                return
+
+        # Get data type
+        data_type_selection = self.dlg.dataTypeComboBox.currentText().strip()
+        if data_type_selection == "other":
+            # Use custom data type from line edit
+            data_type = self.dlg.dataTypeCustomLineEdit.text().strip()
+            if not data_type:
+                self.iface.messageBar().pushMessage(
+                    "Warning",
+                    "Please enter a custom data type",
+                    level=Qgis.Warning,
+                    duration=5,
+                )
+                return
+        else:
+            # Use selected data type from combobox
+            data_type = data_type_selection
+            if not data_type:
+                self.iface.messageBar().pushMessage(
+                    "Warning",
+                    "Please select a data type",
+                    level=Qgis.Warning,
+                    duration=5,
+                )
+                return
+
+        # Upload raster with progress tracking
+        self.set_status(f"Uploading raster from {os.path.basename(filepath)}...")
+        self.dlg.rasterUploadProgressBar.setValue(0)
+
+        # Disable UI during upload
+        self.set_ui_enabled(False)
+
+        # Clean up existing thread if any
+        if self.upload_thread is not None:
+            self.upload_thread.quit()
+            self.upload_thread.wait()
+
+        # Create worker and thread
+        self.upload_thread = QThread()
+        self.upload_worker = DataProductUploadWorker(
+            self.selected_flight, filepath, data_type
+        )
+        self.upload_worker.moveToThread(self.upload_thread)
+
+        # Connect signals
+        self.upload_thread.started.connect(self.upload_worker.run)
+        self.upload_worker.progress.connect(self.on_upload_progress)
+        self.upload_worker.finished.connect(self.on_upload_finished)
+        self.upload_worker.error.connect(self.on_upload_error)
+        self.upload_worker.finished.connect(self.upload_thread.quit)
+        self.upload_worker.error.connect(self.upload_thread.quit)
+
+        # Start thread
+        self.upload_thread.start()
+
+    def on_upload_progress(self, progress):
+        """Handle upload progress update."""
+        self.dlg.rasterUploadProgressBar.setValue(progress)
+
+    def on_upload_finished(self):
+        """Handle successful upload completion."""
+        # Clear form
+        self.dlg.rasterFileLineEdit.clear()
+
+        self.iface.messageBar().pushMessage(
+            "Success",
+            "Raster uploaded successfully. It may take a few minutes to process on the server.",
+            level=Qgis.Success,
+            duration=10,
+        )
+        self.set_status("Raster upload complete")
+
+        # Re-enable UI
+        self.set_ui_enabled(True)
+
+    def on_upload_error(self, error_msg):
+        """Handle upload error."""
+        self.dlg.rasterUploadProgressBar.setValue(0)
+        self.iface.messageBar().pushMessage(
+            "Error",
+            f"Failed to upload raster: {error_msg}",
+            level=Qgis.Critical,
+            duration=10,
+        )
+        self.clear_status()
+
+        # Re-enable UI
+        self.set_ui_enabled(True)
+
+    # ----- Vector Upload Methods -----
+
+    def on_upload_vector(self):
+        """Handle vector layer upload."""
+        if not self.selected_project:
+            self.iface.messageBar().pushMessage(
+                "Warning",
+                "Please select or create a project first",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        # Get layer name
+        layer_name = self.dlg.vectorLayerNameLineEdit.text().strip()
+        if not layer_name:
+            self.iface.messageBar().pushMessage(
+                "Warning",
+                "Please enter a layer name",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        # Get vector GeoJSON
+        feature_collection = None
+        if self.dlg.vectorFileRadio.isChecked():
+            filepath = self.dlg.vectorFileLineEdit.text().strip()
+            if not filepath:
+                self.iface.messageBar().pushMessage(
+                    "Warning",
+                    "Please select a vector file",
+                    level=Qgis.Warning,
+                    duration=5,
+                )
+                return
+            feature_collection = self.vector_file_to_geojson(filepath, as_feature_collection=True)
+        else:
+            index = self.dlg.vectorLayerComboBox.currentIndex()
+            if index < 0:
+                self.iface.messageBar().pushMessage(
+                    "Warning",
+                    "Please select a vector layer",
+                    level=Qgis.Warning,
+                    duration=5,
+                )
+                return
+            layer = self.dlg.vectorLayerComboBox.itemData(index)
+            feature_collection = self.vector_layer_to_geojson_feature_collection(layer)
+
+        if not feature_collection:
+            return
+
+        # Upload vector layer
+        self.set_status(f"Uploading vector layer '{layer_name}'...")
+        try:
+            self.selected_project.add_map_layer(
+                layer_name=layer_name,
+                feature_collection=feature_collection,
+            )
+
+            # Clear form
+            self.dlg.vectorLayerNameLineEdit.clear()
+            self.dlg.vectorFileLineEdit.clear()
+
+            self.iface.messageBar().pushMessage(
+                "Success",
+                f"Vector layer '{layer_name}' uploaded successfully",
+                level=Qgis.Success,
+                duration=5,
+            )
+            self.set_status(f"Vector layer '{layer_name}' uploaded")
+
+        except Exception as e:
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Failed to upload vector layer: {str(e)}",
+                level=Qgis.Critical,
+                duration=10,
+            )
+            self.clear_status()

@@ -100,3 +100,28 @@ class VectorLayersWorker(QObject):
             self.finished.emit(layers)
         except Exception as e:
             self.error.emit(str(e))
+
+
+class DataProductUploadWorker(QObject):
+    """Worker to upload data product with progress tracking in a background thread."""
+    progress = pyqtSignal(int)  # Emits progress percentage (0-100)
+    finished = pyqtSignal()  # Emits when upload completes
+    error = pyqtSignal(str)  # Emits error message
+
+    def __init__(self, flight, filepath, data_type):
+        super().__init__()
+        self.flight = flight
+        self.filepath = filepath
+        self.data_type = data_type
+
+    def run(self):
+        """Upload data product with progress tracking."""
+        try:
+            self.flight.add_data_product(
+                self.filepath,
+                self.data_type,
+                progress_callback=lambda p: self.progress.emit(int(p))
+            )
+            self.finished.emit()
+        except Exception as e:
+            self.error.emit(str(e))

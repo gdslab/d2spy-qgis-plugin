@@ -6,7 +6,7 @@
 name=D2S Browser
 qgisMinimumVersion=3.0
 description=This plugin allows you to browse your data on a D2S instance.
-version=0.4.2
+version=0.5.0
 author=Ben Hancock
 email=hancocb@purdue.edu
 contributors=Jinha Jung, Minyoung Jung

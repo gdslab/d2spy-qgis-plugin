@@ -1,6 +1,6 @@
 Metadata-Version: 2.3
 Name: d2spy
-Version: 0.4.0
+Version: 0.4.1
 Summary: Python package for interacting with a Data to Science instance.
 License: MIT
 Keywords: python,data to science,uas
