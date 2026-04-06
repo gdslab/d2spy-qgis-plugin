@@ -79,6 +79,29 @@
         </property>
        </widget>
       </item>
+      <item>
+       <widget class="QPushButton" name="requestApiKeyPushButton">
+        <property name="text">
+         <string>Request API Key</string>
+        </property>
+        <property name="visible">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="apiKeyHintLabel">
+        <property name="text">
+         <string>An API key is required to access your D2S data.</string>
+        </property>
+        <property name="visible">
+         <bool>false</bool>
+        </property>
+        <property name="styleSheet">
+         <string>QLabel { color: #888; font-size: 11px; }</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>

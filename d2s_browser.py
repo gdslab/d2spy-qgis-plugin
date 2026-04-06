@@ -95,6 +95,9 @@ class D2SBrowser:
         # API key for authorized user
         self.api_key = ""
 
+        # Auth object for authenticated session
+        self.auth = None
+
         # Store projects returned from API
         self.projects = []
 
@@ -263,6 +266,8 @@ class D2SBrowser:
 
             # Event when login button clicked
             self.dlg.loginPushButton.clicked.connect(self.login)
+            # Event when request API key button clicked
+            self.dlg.requestApiKeyPushButton.clicked.connect(self.request_api_key)
             # Event when project combobox changed
             self.dlg.projectsComboBox.currentIndexChanged.connect(self.update_flights)
             # Event when flight combobox changed
@@ -430,6 +435,9 @@ class D2SBrowser:
             )
             return
 
+        # Store auth object for API key requests
+        self.auth = auth
+
         # Get user model
         user = auth.get_current_user()
 
@@ -445,8 +453,12 @@ class D2SBrowser:
                 level=Qgis.Warning,
                 duration=10,
             )
+            self.dlg.requestApiKeyPushButton.setVisible(True)
+            self.dlg.apiKeyHintLabel.setVisible(True)
         else:
             self.api_key = user.api_access_token
+            self.dlg.requestApiKeyPushButton.setVisible(False)
+            self.dlg.apiKeyHintLabel.setVisible(False)
 
         # Create a workspace
         workspace = Workspace(server, session)
@@ -454,6 +466,55 @@ class D2SBrowser:
 
         # Get user projects
         self.update_projects()
+
+    def request_api_key(self):
+        """Request an API key from the D2S instance."""
+        if not self.auth:
+            return
+
+        self.set_status("Requesting API key...")
+        try:
+            response = self.auth.session.get(
+                f"{self.auth.base_url}/api/v1/auth/request-api-key"
+            )
+            if response.status_code == 200:
+                # Fetch updated user object with the new API key
+                user = self.auth.get_current_user()
+                if user and hasattr(user, "api_access_token") and user.api_access_token:
+                    self.api_key = user.api_access_token
+                    self.dlg.requestApiKeyPushButton.setVisible(False)
+                    self.dlg.apiKeyHintLabel.setVisible(False)
+                    self.clear_status()
+                    self.iface.messageBar().pushMessage(
+                        "Success",
+                        "API key has been set.",
+                        level=Qgis.Success,
+                        duration=5,
+                    )
+                else:
+                    self.clear_status()
+                    self.iface.messageBar().pushMessage(
+                        "Warning",
+                        "API key request succeeded but key was not found on user profile.",
+                        level=Qgis.Warning,
+                        duration=10,
+                    )
+            else:
+                self.clear_status()
+                self.iface.messageBar().pushMessage(
+                    "Error",
+                    f"Failed to request API key (HTTP {response.status_code}).",
+                    level=Qgis.Critical,
+                    duration=10,
+                )
+        except Exception as e:
+            self.clear_status()
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Error requesting API key: {str(e)}",
+                level=Qgis.Critical,
+                duration=10,
+            )
 
     def refresh_projects(self):
         """Refresh projects by clearing cache and fetching fresh data."""
