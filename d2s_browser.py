@@ -339,7 +339,7 @@ class D2SBrowser:
         # show the dialog
         self.dlg.show()
         # Run the dialog event loop
-        result = self.dlg.exec_()
+        result = self.dlg.exec()
         # See if OK was pressed
         if result:
             # Do something useful here - delete the line containing pass and
@@ -803,8 +803,8 @@ class D2SBrowser:
             for index, data_product in enumerate(self.data_products):
                 # Add data product to list with unchecked checkbox
                 item = QListWidgetItem(data_product.data_type)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Unchecked)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
 
                 # Add data product list item to list widget
                 self.dlg.dataProductsListWidget.addItem(item)
@@ -847,7 +847,7 @@ class D2SBrowser:
         # Iterate over each data product and add urls for checked data products in list
         for index in range(self.dlg.dataProductsListWidget.count()):
             item = self.dlg.dataProductsListWidget.item(index)
-            if item.checkState() == Qt.Checked:
+            if item.checkState() == Qt.CheckState.Checked:
                 # Get url for data product
                 data_type = self.data_products[index].data_type
                 layer_name = f"{flight_prefix}_{data_type}"
@@ -945,8 +945,8 @@ class D2SBrowser:
             for layer in self.vector_layers:
                 # Add layer to list with unchecked checkbox
                 item = QListWidgetItem(layer.get("layer_name", "Unknown"))
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Unchecked)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
 
                 # Add layer list item to list widget
                 self.dlg.mapLayersListWidget.addItem(item)
@@ -999,7 +999,7 @@ class D2SBrowser:
         # Iterate over each vector layer and add URLs for checked layers in list
         for index in range(self.dlg.mapLayersListWidget.count()):
             item = self.dlg.mapLayersListWidget.item(index)
-            if item.checkState() == Qt.Checked:
+            if item.checkState() == Qt.CheckState.Checked:
                 # Get layer info
                 layer_data = self.vector_layers[index]
                 layer_name = layer_data.get("layer_name", "Unknown")
