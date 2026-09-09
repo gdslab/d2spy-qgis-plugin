@@ -1,13 +1,15 @@
 # This file contains metadata for your plugin.
 
-# This file should be included when you package your plugin.# Mandatory items:
+# This file should be included when you package your plugin.
+
+# Mandatory items:
 
 [general]
 name=D2S Browser
-qgisMinimumVersion=3.0
+qgisMinimumVersion=3.22
 qgisMaximumVersion = 4.99
 description=This plugin allows you to browse your data on a D2S instance.
-version=0.6.0
+version=0.6.1
 author=Ben Hancock
 email=hancocb@purdue.edu
 contributors=Jinha Jung, Minyoung Jung
@@ -21,8 +23,16 @@ repository=https://github.com/gdslab/d2spy-qgis-plugin
 # Recommended items:
 
 hasProcessingProvider=no
-# Uncomment the following line and add your changelog:
-# changelog=
+
+changelog=0.6.1
+    - All D2S requests now use a timeout, so an unresponsive server no longer freezes QGIS.
+    - An unreachable server reports an error in the message bar instead of a traceback dialog.
+    - Uses the requests library shipped with QGIS rather than bundling a second copy.
+    - Updated the bundled d2spy client to 0.4.4.
+    - Packages are built by a script that ships only the files QGIS needs.
+    0.6.0
+    - Create tab for adding projects, flights, data products and map layers.
+    - Compatible with both Qt5 and Qt6 builds of QGIS.
 
 # Tags are comma separated with spaces allowed
 tags=python,uas,raster,d2s
@@ -41,7 +51,7 @@ deprecated=False
 # Check the documentation for more information.
 # plugin_dependencies=
 
-Category of the plugin: Raster, Vector, Database or Web
+# Category of the plugin: Raster, Vector, Database or Web
 # category=
 
 # If the plugin can run on QGIS Server.
