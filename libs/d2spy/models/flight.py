@@ -2,7 +2,7 @@ import json
 import os
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Union
+from typing import Callable, Dict, List, Literal, Optional, Union
 from uuid import UUID
 
 from d2spy import models, schemas
@@ -45,7 +45,7 @@ class Flight:
         self,
         filepath: str,
         data_type: Union[Literal["dsm", "point_cloud", "ortho"], str],
-        progress_callback: Optional[callable] = None,
+        progress_callback: Optional[Callable[[float], None]] = None,
     ) -> None:
         """Uploads data product to D2S. After the upload finishes, the data product may
         not be available for several minutes while it is processed on the D2S server. It
@@ -54,9 +54,10 @@ class Flight:
         Args:
             filepath (str): Full path to data product on local file system.
             data_type (Union[Literal["dsm", "point_cloud", "ortho"], str]): Data type.
-            progress_callback (Optional[callable]): Optional callback function to report
-                upload progress. The function should accept a single float argument
-                representing the upload progress percentage (0.0 to 100.0).
+            progress_callback (Optional[Callable[[float], None]]): Optional
+                callback function to report upload progress. The function
+                should accept a single float argument representing the upload
+                progress percentage (0.0 to 100.0).
         """
         verify_file_exists(filepath)
         validate_file_extension_and_data_type(filepath, data_type)
@@ -102,7 +103,9 @@ class Flight:
                 print(f"Upload progress: {progress:.2f}%", end="\r")
 
     def add_raw_data(
-        self, filepath: str, progress_callback: Optional[callable] = None
+        self,
+        filepath: str,
+        progress_callback: Optional[Callable[[float], None]] = None,
     ) -> None:
         """Uploads zipped raw data to D2S. After the upload finishes, the raw data may
         not be available for several minutes while it is processed on the D2S server. It
@@ -110,9 +113,10 @@ class Flight:
 
         Args:
             filepath (str): Full path to data product on local file system.
-            progress_callback (Optional[callable]): Optional callback function to report
-                upload progress. The function should accept a single float argument
-                representing the upload progress percentage (0.0 to 100.0).
+            progress_callback (Optional[Callable[[float], None]]): Optional
+                callback function to report upload progress. The function
+                should accept a single float argument representing the upload
+                progress percentage (0.0 to 100.0).
         """
         verify_file_exists(filepath)
         validate_file_extension_for_raw_data(filepath)
