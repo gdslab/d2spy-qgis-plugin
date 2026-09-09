@@ -41,6 +41,18 @@ from .d2s_browser_workers import ProjectsWorker, FlightsWorker, DataProductsWork
 import os.path
 import sys
 
+# Imported before libs/ joins sys.path so QGIS's copy is the one cached in
+# sys.modules and reused by d2spy.
+try:
+    import requests  # noqa: F401
+except ImportError as e:
+    raise ImportError(
+        "D2S Browser requires the 'requests' package, which normally ships "
+        "with QGIS. On OSGeo4W, install python3-requests. Otherwise run "
+        "'python -m pip install requests' against the Python interpreter QGIS "
+        "uses, then restart QGIS."
+    ) from e
+
 # Add bundled libraries to sys.path
 plugin_dir = os.path.dirname(__file__)
 libs_dir = os.path.join(plugin_dir, "libs")
@@ -253,6 +265,11 @@ class D2SBrowser:
             self.iface.removePluginMenu(self.tr("&D2S Browser"), action)
             self.iface.removeToolBarIcon(action)
 
+        # Drop the vendored d2spy so a plugin reload imports the copy on disk.
+        # requests is left alone because it belongs to QGIS.
+        for name in [m for m in sys.modules if m == "d2spy" or m.startswith("d2spy.")]:
+            del sys.modules[name]
+
     def run(self):
         """Run method that performs all the real work"""
 
@@ -399,8 +416,20 @@ class D2SBrowser:
         email = self.dlg.emailLineEdit.text()
         password = self.dlg.passwordLineEdit.text()
 
+        # Auth() raises ValueError when the server cannot be reached.
+        try:
+            auth = Auth(server)
+        except ValueError as e:
+            self.clear_status()
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Unable to reach D2S server at {server}: {e}",
+                level=Qgis.Critical,
+                duration=10,
+            )
+            return
+
         # Login to D2S instance using provided credentials
-        auth = Auth(server)
         try:
             session = auth.login(email, password)
         except EOFError:
@@ -439,7 +468,17 @@ class D2SBrowser:
         self.auth = auth
 
         # Get user model
-        user = auth.get_current_user()
+        try:
+            user = auth.get_current_user()
+        except requests.exceptions.RequestException as e:
+            self.clear_status()
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Lost connection to D2S server: {e}",
+                level=Qgis.Critical,
+                duration=10,
+            )
+            return
 
         # Check for API key
         if (
