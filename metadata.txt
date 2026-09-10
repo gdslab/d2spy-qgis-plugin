@@ -9,7 +9,7 @@ name=D2S Browser
 qgisMinimumVersion=3.22
 qgisMaximumVersion = 4.99
 description=This plugin allows you to browse your data on a D2S instance.
-version=0.6.2
+version=0.6.3
 author=Ben Hancock
 email=hancocb@purdue.edu
 contributors=Jinha Jung, Minyoung Jung
@@ -24,7 +24,10 @@ repository=https://github.com/gdslab/d2spy-qgis-plugin
 
 hasProcessingProvider=no
 
-changelog=0.6.2
+changelog=0.6.3
+    - Use scoped enum names throughout, as required for Qt6 builds of QGIS.
+    - Code style cleanup flagged by the plugin repository's lint check.
+    0.6.2
     - All D2S requests now use a timeout, so an unresponsive server no longer freezes QGIS.
     - An unreachable server reports an error in the message bar instead of a traceback dialog.
     - Uses the requests library shipped with QGIS rather than bundling a second copy.

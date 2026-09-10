@@ -31,13 +31,19 @@ from datetime import date
 import json
 
 # Initialize Qt resources from file resources.py
-from .resources import *
+from . import resources  # noqa: F401
 
 # Import the code for the dialog
 from .d2s_browser_dialog import D2SBrowserDialog
 
 # Import worker classes for threaded API calls
-from .d2s_browser_workers import ProjectsWorker, FlightsWorker, DataProductsWorker, VectorLayersWorker, DataProductUploadWorker
+from .d2s_browser_workers import (
+    ProjectsWorker,
+    FlightsWorker,
+    DataProductsWorker,
+    VectorLayersWorker,
+    DataProductUploadWorker,
+)
 import os.path
 import sys
 
@@ -59,9 +65,9 @@ libs_dir = os.path.join(plugin_dir, "libs")
 if libs_dir not in sys.path:
     sys.path.insert(0, libs_dir)
 
-# Import d2spy from bundled libraries
-from d2spy.auth import Auth
-from d2spy.workspace import Workspace
+# Import d2spy from bundled libraries. Must follow the sys.path insert above.
+from d2spy.auth import Auth  # noqa: E402
+from d2spy.workspace import Workspace  # noqa: E402
 
 
 NON_RASTER_TYPES = frozenset({"panoramic", "point_cloud", "3dgs"})
@@ -275,7 +281,7 @@ class D2SBrowser:
 
         # Create the dialog with elements (after translation) and keep reference
         # Only create GUI ONCE in callback, so that it will only load when the plugin is started
-        if self.first_start == True:
+        if self.first_start:
             self.first_start = False
             self.dlg = D2SBrowserDialog()
 
@@ -424,7 +430,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 f"Unable to reach D2S server at {server}: {e}",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
             return
@@ -439,7 +445,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 "Authentication failed. Please check your email and password.",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
             return
@@ -449,7 +455,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 f"Authentication error: {str(e)}",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
             return
@@ -459,7 +465,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 "Unable to sign in with provided credentials",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
             return
@@ -475,7 +481,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 f"Lost connection to D2S server: {e}",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
             return
@@ -489,7 +495,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please request an API key from the D2S profile page.",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=10,
             )
             self.dlg.requestApiKeyPushButton.setVisible(True)
@@ -527,7 +533,7 @@ class D2SBrowser:
                     self.iface.messageBar().pushMessage(
                         "Success",
                         "API key has been set.",
-                        level=Qgis.Success,
+                        level=Qgis.MessageLevel.Success,
                         duration=5,
                     )
                 else:
@@ -535,7 +541,7 @@ class D2SBrowser:
                     self.iface.messageBar().pushMessage(
                         "Warning",
                         "API key request succeeded but key was not found on user profile.",
-                        level=Qgis.Warning,
+                        level=Qgis.MessageLevel.Warning,
                         duration=10,
                     )
             else:
@@ -543,7 +549,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Error",
                     f"Failed to request API key (HTTP {response.status_code}).",
-                    level=Qgis.Critical,
+                    level=Qgis.MessageLevel.Critical,
                     duration=10,
                 )
         except Exception as e:
@@ -551,7 +557,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 f"Error requesting API key: {str(e)}",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
 
@@ -670,7 +676,7 @@ class D2SBrowser:
         self.iface.messageBar().pushMessage(
             "Error",
             f"Failed to load projects: {error_message}",
-            level=Qgis.Critical,
+            level=Qgis.MessageLevel.Critical,
             duration=10,
         )
         # Re-enable UI
@@ -770,7 +776,7 @@ class D2SBrowser:
         self.iface.messageBar().pushMessage(
             "Error",
             f"Failed to load flights: {error_message}",
-            level=Qgis.Critical,
+            level=Qgis.MessageLevel.Critical,
             duration=10,
         )
         # Re-enable UI
@@ -862,7 +868,7 @@ class D2SBrowser:
         self.iface.messageBar().pushMessage(
             "Error",
             f"Failed to load data products: {error_message}",
-            level=Qgis.Critical,
+            level=Qgis.MessageLevel.Critical,
             duration=10,
         )
         # Re-enable UI
@@ -902,7 +908,7 @@ class D2SBrowser:
                     self.iface.messageBar().pushMessage(
                         "Warning",
                         f"Invalid url: {url}",
-                        level=Qgis.Warning,
+                        level=Qgis.MessageLevel.Warning,
                         duration=5,
                     )
 
@@ -1009,7 +1015,7 @@ class D2SBrowser:
         self.iface.messageBar().pushMessage(
             "Error",
             f"Failed to load map layers: {error_message}",
-            level=Qgis.Critical,
+            level=Qgis.MessageLevel.Critical,
             duration=10,
         )
         # Hide map layers section on error
@@ -1045,7 +1051,10 @@ class D2SBrowser:
                 layer_id = layer_data.get("layer_id")
 
                 # Construct FlatGeobuf URL with API key for authentication
-                fgb_url = f"{self.workspace.base_url}/static/projects/{project_id}/vector/{layer_id}/{layer_id}.fgb?API_KEY={self.api_key}"
+                fgb_url = (
+                    f"{self.workspace.base_url}/static/projects/{project_id}"
+                    f"/vector/{layer_id}/{layer_id}.fgb?API_KEY={self.api_key}"
+                )
 
                 # Create layer name for QGIS
                 qgis_layer_name = f"{project_title}_{layer_name}"
@@ -1061,7 +1070,7 @@ class D2SBrowser:
                     self.iface.messageBar().pushMessage(
                         "Warning",
                         f"Failed to load layer: {layer_name}",
-                        level=Qgis.Warning,
+                        level=Qgis.MessageLevel.Warning,
                         duration=5,
                     )
 
@@ -1100,7 +1109,7 @@ class D2SBrowser:
             QgsMessageLog.logMessage(
                 f"Could not load projects for the Create tab: {e}",
                 "D2S Browser",
-                Qgis.Warning,
+                Qgis.MessageLevel.Warning,
             )
 
     def populate_create_flights(self, project):
@@ -1117,7 +1126,7 @@ class D2SBrowser:
         self.dlg.projectBoundaryLayerComboBox.clear()
         layers = QgsProject.instance().mapLayers().values()
         for layer in layers:
-            if isinstance(layer, QgsVectorLayer) and layer.geometryType() == QgsWkbTypes.PolygonGeometry:
+            if isinstance(layer, QgsVectorLayer) and layer.geometryType() == QgsWkbTypes.GeometryType.PolygonGeometry:
                 self.dlg.projectBoundaryLayerComboBox.addItem(layer.name(), layer)
 
     def populate_vector_layers(self):
@@ -1170,7 +1179,7 @@ class D2SBrowser:
                     self.iface.messageBar().pushMessage(
                         "Info",
                         "MultiPolygon detected. Using first polygon as project boundary.",
-                        level=Qgis.Info,
+                        level=Qgis.MessageLevel.Info,
                         duration=5,
                     )
 
@@ -1179,7 +1188,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 f"Failed to convert layer to GeoJSON: {str(e)}",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
             return None
@@ -1204,7 +1213,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 f"Failed to convert layer to GeoJSON: {str(e)}",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
             return None
@@ -1226,7 +1235,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Error",
                     f"Failed to load vector file: {filepath}",
-                    level=Qgis.Critical,
+                    level=Qgis.MessageLevel.Critical,
                     duration=10,
                 )
                 return None
@@ -1239,7 +1248,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 f"Failed to process vector file: {str(e)}",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
             return None
@@ -1344,7 +1353,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please log in first",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=5,
             )
             return
@@ -1393,7 +1402,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please log in first",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=5,
             )
             return
@@ -1406,7 +1415,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please enter a project title",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=5,
             )
             return
@@ -1415,7 +1424,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please enter a project description",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=5,
             )
             return
@@ -1428,7 +1437,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Warning",
                     "Please select a project boundary file",
-                    level=Qgis.Warning,
+                    level=Qgis.MessageLevel.Warning,
                     duration=5,
                 )
                 return
@@ -1439,7 +1448,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Warning",
                     "Please select a project boundary layer",
-                    level=Qgis.Warning,
+                    level=Qgis.MessageLevel.Warning,
                     duration=5,
                 )
                 return
@@ -1504,7 +1513,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Success",
                 f"Project '{title}' created successfully",
-                level=Qgis.Success,
+                level=Qgis.MessageLevel.Success,
                 duration=5,
             )
             self.set_status(f"Project created: {new_project.title}")
@@ -1513,7 +1522,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 f"Failed to create project: {str(e)}",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
             self.clear_status()
@@ -1526,7 +1535,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please select or create a project first",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=5,
             )
             return
@@ -1536,7 +1545,11 @@ class D2SBrowser:
             return
 
         self.selected_flight = self.dlg.createFlightsComboBox.itemData(index)
-        display_name = self.selected_flight.name if self.selected_flight.name else f"Flight {self.selected_flight.acquisition_date}"
+        display_name = (
+            self.selected_flight.name
+            if self.selected_flight.name
+            else f"Flight {self.selected_flight.acquisition_date}"
+        )
         self.dlg.flightStatusLabel.setText(f"Selected: {display_name}")
 
         # Enable Data Product column
@@ -1555,7 +1568,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please select or create a project first",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=5,
             )
             return
@@ -1577,7 +1590,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Warning",
                     "Please enter a custom platform",
-                    level=Qgis.Warning,
+                    level=Qgis.MessageLevel.Warning,
                     duration=5,
                 )
                 return
@@ -1589,7 +1602,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please enter a valid altitude",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=5,
             )
             return
@@ -1632,7 +1645,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Success",
                 f"Flight '{display_name}' created successfully",
-                level=Qgis.Success,
+                level=Qgis.MessageLevel.Success,
                 duration=5,
             )
             self.set_status(f"Flight created: {display_name}")
@@ -1641,7 +1654,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 f"Failed to create flight: {str(e)}",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
             self.clear_status()
@@ -1654,7 +1667,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please select or create a flight first",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=5,
             )
             return
@@ -1667,7 +1680,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Warning",
                     "Please select a raster file",
-                    level=Qgis.Warning,
+                    level=Qgis.MessageLevel.Warning,
                     duration=5,
                 )
                 return
@@ -1677,7 +1690,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Warning",
                     "Please select a raster layer",
-                    level=Qgis.Warning,
+                    level=Qgis.MessageLevel.Warning,
                     duration=5,
                 )
                 return
@@ -1689,7 +1702,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Error",
                     "Selected layer is not a local file. Please use a file-based raster layer.",
-                    level=Qgis.Critical,
+                    level=Qgis.MessageLevel.Critical,
                     duration=10,
                 )
                 return
@@ -1703,7 +1716,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Warning",
                     "Please enter a custom data type",
-                    level=Qgis.Warning,
+                    level=Qgis.MessageLevel.Warning,
                     duration=5,
                 )
                 return
@@ -1714,7 +1727,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Warning",
                     "Please select a data type",
-                    level=Qgis.Warning,
+                    level=Qgis.MessageLevel.Warning,
                     duration=5,
                 )
                 return
@@ -1761,7 +1774,7 @@ class D2SBrowser:
         self.iface.messageBar().pushMessage(
             "Success",
             "Raster uploaded successfully. It may take a few minutes to process on the server.",
-            level=Qgis.Success,
+            level=Qgis.MessageLevel.Success,
             duration=10,
         )
         self.set_status("Raster upload complete")
@@ -1775,7 +1788,7 @@ class D2SBrowser:
         self.iface.messageBar().pushMessage(
             "Error",
             f"Failed to upload raster: {error_msg}",
-            level=Qgis.Critical,
+            level=Qgis.MessageLevel.Critical,
             duration=10,
         )
         self.clear_status()
@@ -1791,7 +1804,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please select or create a project first",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=5,
             )
             return
@@ -1802,7 +1815,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Warning",
                 "Please enter a layer name",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=5,
             )
             return
@@ -1815,7 +1828,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Warning",
                     "Please select a vector file",
-                    level=Qgis.Warning,
+                    level=Qgis.MessageLevel.Warning,
                     duration=5,
                 )
                 return
@@ -1826,7 +1839,7 @@ class D2SBrowser:
                 self.iface.messageBar().pushMessage(
                     "Warning",
                     "Please select a vector layer",
-                    level=Qgis.Warning,
+                    level=Qgis.MessageLevel.Warning,
                     duration=5,
                 )
                 return
@@ -1851,7 +1864,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Success",
                 f"Vector layer '{layer_name}' uploaded successfully",
-                level=Qgis.Success,
+                level=Qgis.MessageLevel.Success,
                 duration=5,
             )
             self.set_status(f"Vector layer '{layer_name}' uploaded")
@@ -1860,7 +1873,7 @@ class D2SBrowser:
             self.iface.messageBar().pushMessage(
                 "Error",
                 f"Failed to upload vector layer: {str(e)}",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10,
             )
             self.clear_status()
