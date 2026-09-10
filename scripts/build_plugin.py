@@ -2,8 +2,8 @@
 """Build a distributable zip of the D2S Browser QGIS plugin.
 
 Stages only the files QGIS needs, refuses to ship anything on a forbidden
-list, runs the same security scanners as plugins.qgis.org, and writes a
-byte-reproducible archive.
+list, runs the security scanners plugins.qgis.org runs with Bandit's full
+rule set, and writes a byte-reproducible archive.
 """
 
 import argparse
@@ -106,7 +106,11 @@ def collect(plugin_dir: Path) -> list[Path]:
     return sorted(set(selected))
 
 
-def check_forbidden(paths: list[Path]) -> None:
+# Hidden files plugins.qgis.org allowlists. Any other dotfile is flagged there.
+ALLOWED_DOTFILES = {".bandit", ".flake8", ".secrets.baseline"}
+
+
+def check_forbidden(plugin_dir: Path, paths: list[Path]) -> None:
     patterns = [re.compile(p) for p in FORBIDDEN]
     violations = [
         f"{path} (matched {p.pattern})"
@@ -114,6 +118,23 @@ def check_forbidden(paths: list[Path]) -> None:
         for p in patterns
         if p.search(str(path))
     ]
+    violations += [
+        f"{path} (dotfile not in {sorted(ALLOWED_DOTFILES)})"
+        for path in paths
+        if path.name.startswith(".") and path.name not in ALLOWED_DOTFILES
+    ]
+    bandit_cfgs = [p for p in paths if p.name == ".bandit"]
+    if len(bandit_cfgs) > 1:
+        violations.append("more than one .bandit file; bandit refuses to run")
+    elif bandit_cfgs:
+        # plugins.qgis.org runs bandit -t <rules>. A rule listed under skips
+        # that is also in -t makes bandit exit with no report, so only path
+        # exclusions are safe to ship.
+        cfg = configparser.ConfigParser()
+        cfg.read(plugin_dir / bandit_cfgs[0], encoding="utf-8")
+        keys = set(cfg["bandit"].keys()) if cfg.has_section("bandit") else set()
+        if not keys <= {"exclude"}:
+            violations.append(f".bandit may only set 'exclude', found {sorted(keys)}")
     if violations:
         sys.exit(
             "error: forbidden paths would be shipped:\n  "
@@ -133,8 +154,13 @@ def stage(plugin_dir: Path, paths: list[Path], staging: Path) -> Path:
     return root
 
 
-def run_scanners(staged_root: Path) -> None:
-    """Run the plugins.qgis.org scanners. Exits non-zero on any finding."""
+def run_scanners(staging: Path) -> None:
+    """Run the plugins.qgis.org scanners. Exits non-zero on any finding.
+
+    Bandit runs its full default rule set, stricter than the site's selected
+    subset, and targets the parent of the plugin folder as the site does so a
+    shipped .bandit file is discovered the same way.
+    """
     if shutil.which("uvx") is None:
         sys.exit(
             "error: uvx not found, so the security scan cannot run.\n"
@@ -142,24 +168,27 @@ def run_scanners(staged_root: Path) -> None:
             "release build)."
         )
 
-    print("running bandit ...")
+    print("running bandit (full rule set) ...")
     bandit = subprocess.run(
-        ["uvx", "bandit", "-r", str(staged_root), "-f", "json", "--quiet", "-ll"],
+        ["uvx", "bandit", "-r", str(staging), "-f", "json", "--quiet"],
         capture_output=True,
         text=True,
     )
     try:
         results = json.loads(bandit.stdout)["results"]
     except (ValueError, KeyError):
-        sys.exit(f"error: could not parse bandit output:\n{bandit.stderr}")
+        sys.exit(
+            "error: bandit produced no report. This also happens when more "
+            f"than one .bandit file is present.\n{bandit.stderr}"
+        )
     if results:
         for r in results:
             print(
                 f"  {r['issue_severity']} {r['test_id']} "
                 f"{r['filename']}:{r['line_number']}"
             )
-        sys.exit(f"error: bandit reported {len(results)} medium-or-higher findings")
-    print("  no medium-or-higher findings")
+        sys.exit(f"error: bandit reported {len(results)} finding(s)")
+    print("  no findings")
 
     print("running detect-secrets ...")
     secrets = subprocess.run(
@@ -170,7 +199,9 @@ def run_scanners(staged_root: Path) -> None:
             "--all-files",
             "--exclude-files",
             r"metadata\.txt",
-            str(staged_root),
+            "--exclude-files",
+            r"\.secrets\.baseline",
+            str(staging),
         ],
         capture_output=True,
         text=True,
@@ -239,7 +270,7 @@ def main() -> None:
     out_file = out_dir / f"{PLUGIN_NAME}_v{version}.zip"
 
     paths = collect(plugin_dir)
-    check_forbidden(paths)
+    check_forbidden(plugin_dir, paths)
 
     staging = plugin_dir / "build"
     staged_root = stage(plugin_dir, paths, staging)
@@ -247,7 +278,7 @@ def main() -> None:
     if args.no_scan:
         print("skipping security scan (--no-scan)")
     else:
-        run_scanners(staged_root)
+        run_scanners(staging)
 
     write_zip(staged_root, paths, out_file)
     shutil.rmtree(staging)

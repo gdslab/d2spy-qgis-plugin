@@ -1,6 +1,6 @@
 Metadata-Version: 2.5
 Name: d2spy
-Version: 0.4.4
+Version: 0.4.5
 Summary: Python package for interacting with a Data to Science instance.
 Author-email: Jinha Jung <jinha@purdue.edu>, Minyoung Jung <jung411@purdue.edu>, Ben Hancock <hancocb@purdue.edu>
 License-Expression: MIT

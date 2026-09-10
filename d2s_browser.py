@@ -21,7 +21,7 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.core import Qgis, QgsProject, QgsRasterLayer, QgsVectorLayer, QgsJsonExporter, QgsWkbTypes
+from qgis.core import Qgis, QgsProject, QgsRasterLayer, QgsVectorLayer, QgsJsonExporter, QgsWkbTypes, QgsMessageLog
 
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QThread
 from qgis.PyQt.QtGui import QIcon
@@ -1097,8 +1097,11 @@ class D2SBrowser:
             for project in sorted_projects:
                 self.dlg.createProjectsComboBox.addItem(project.title, project)
         except Exception as e:
-            # Silently fail - this is not critical
-            pass
+            QgsMessageLog.logMessage(
+                f"Could not load projects for the Create tab: {e}",
+                "D2S Browser",
+                Qgis.Warning,
+            )
 
     def populate_create_flights(self, project):
         """Populate the create tab flights combobox for a given project."""
