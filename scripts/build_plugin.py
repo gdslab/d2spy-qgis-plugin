@@ -29,7 +29,6 @@ INCLUDE_FILES = [
     "metadata.txt",
     "icon.png",
     "LICENSE",
-    ".flake8",
 ]
 
 # Vendored dependencies. Only d2spy; requests comes from QGIS.
@@ -106,11 +105,13 @@ def collect(plugin_dir: Path) -> list[Path]:
     return sorted(set(selected))
 
 
-# Hidden files plugins.qgis.org allowlists. Any other dotfile is flagged there.
-ALLOWED_DOTFILES = {".bandit", ".flake8", ".secrets.baseline"}
+# plugins.qgis.org treats these as developer config: the scan passes but the
+# version is held for manual review, and its results email is mis-templated
+# as BLOCKED. Any other dotfile is flagged outright. Ship none.
+SCAN_CONFIG_FILES = {".bandit", ".secrets.baseline", ".flake8"}
 
 
-def check_forbidden(plugin_dir: Path, paths: list[Path]) -> None:
+def check_forbidden(paths: list[Path]) -> None:
     patterns = [re.compile(p) for p in FORBIDDEN]
     violations = [
         f"{path} (matched {p.pattern})"
@@ -118,23 +119,11 @@ def check_forbidden(plugin_dir: Path, paths: list[Path]) -> None:
         for p in patterns
         if p.search(str(path))
     ]
-    violations += [
-        f"{path} (dotfile not in {sorted(ALLOWED_DOTFILES)})"
-        for path in paths
-        if path.name.startswith(".") and path.name not in ALLOWED_DOTFILES
-    ]
-    bandit_cfgs = [p for p in paths if p.name == ".bandit"]
-    if len(bandit_cfgs) > 1:
-        violations.append("more than one .bandit file; bandit refuses to run")
-    elif bandit_cfgs:
-        # plugins.qgis.org runs bandit -t <rules>. A rule listed under skips
-        # that is also in -t makes bandit exit with no report, so only path
-        # exclusions are safe to ship.
-        cfg = configparser.ConfigParser()
-        cfg.read(plugin_dir / bandit_cfgs[0], encoding="utf-8")
-        keys = set(cfg["bandit"].keys()) if cfg.has_section("bandit") else set()
-        if not keys <= {"exclude"}:
-            violations.append(f".bandit may only set 'exclude', found {sorted(keys)}")
+    for path in paths:
+        if path.name in SCAN_CONFIG_FILES:
+            violations.append(f"{path} (scanner config, forces manual review)")
+        elif path.name.startswith("."):
+            violations.append(f"{path} (dotfile, flagged by plugins.qgis.org)")
     if violations:
         sys.exit(
             "error: forbidden paths would be shipped:\n  "
@@ -158,8 +147,7 @@ def run_scanners(staging: Path) -> None:
     """Run the plugins.qgis.org scanners. Exits non-zero on any finding.
 
     Bandit runs its full default rule set, stricter than the site's selected
-    subset, and targets the parent of the plugin folder as the site does so a
-    shipped .bandit file is discovered the same way.
+    subset, and targets the parent of the plugin folder as the site does.
     """
     if shutil.which("uvx") is None:
         sys.exit(
@@ -178,8 +166,7 @@ def run_scanners(staging: Path) -> None:
         results = json.loads(bandit.stdout)["results"]
     except (ValueError, KeyError):
         sys.exit(
-            "error: bandit produced no report. This also happens when more "
-            f"than one .bandit file is present.\n{bandit.stderr}"
+            f"error: bandit produced no report.\n{bandit.stderr}"
         )
     if results:
         for r in results:
@@ -270,7 +257,7 @@ def main() -> None:
     out_file = out_dir / f"{PLUGIN_NAME}_v{version}.zip"
 
     paths = collect(plugin_dir)
-    check_forbidden(plugin_dir, paths)
+    check_forbidden(paths)
 
     staging = plugin_dir / "build"
     staged_root = stage(plugin_dir, paths, staging)
