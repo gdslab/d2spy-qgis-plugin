@@ -135,6 +135,12 @@ class D2SBrowser:
         self.vector_layers_thread = None
         self.upload_thread = None
 
+        # Project and flight the in-flight workers were started for. Results
+        # are cached under these and dropped if the selection has moved on.
+        self.flights_request_project = None
+        self.data_products_request_flight = None
+        self.vector_layers_request_project = None
+
         # Cache API responses to avoid redundant requests
         self.projects_cache = None
         self.flights_cache = {}  # Key: project_id, Value: list of flights
@@ -292,10 +298,12 @@ class D2SBrowser:
             # Event when request API key button clicked
             self.dlg.requestApiKeyPushButton.clicked.connect(self.request_api_key)
             # Event when project combobox changed
-            self.dlg.projectsComboBox.currentIndexChanged.connect(self.update_flights)
+            self.dlg.projectsComboBox.currentIndexChanged.connect(
+                self.on_project_changed
+            )
             # Event when flight combobox changed
             self.dlg.flightsComboBox.currentIndexChanged.connect(
-                self.update_data_products
+                self.on_flight_changed
             )
             # Event when project refresh button clicked
             self.dlg.projectsRefreshPushButton.clicked.connect(self.refresh_projects)
@@ -398,6 +406,30 @@ class D2SBrowser:
             self.dlg.mapLayersListWidget.setEnabled(enabled)
         if hasattr(self.dlg, "mapLayersPushButton"):
             self.dlg.mapLayersPushButton.setEnabled(enabled)
+
+    def clear_combobox(self, combobox):
+        """Clear a combobox without emitting currentIndexChanged(-1).
+
+        QComboBox.clear() emits currentIndexChanged(-1) when it held items.
+        The project and flight comboboxes drive API requests from that signal,
+        so an unblocked clear() would fire a request against the previous
+        selection's stale list.
+        """
+        combobox.blockSignals(True)
+        combobox.clear()
+        combobox.blockSignals(False)
+
+    def on_project_changed(self, index):
+        """Handle user selecting a project in the Browse tab."""
+        if index < 0:
+            return
+        self.update_flights()
+
+    def on_flight_changed(self, index):
+        """Handle user selecting a flight in the Browse tab."""
+        if index < 0:
+            return
+        self.update_data_products()
 
     def clear_cache(self):
         """Clear all cached API responses."""
@@ -598,14 +630,13 @@ class D2SBrowser:
         # Check cache first
         if use_cache and self.projects_cache is not None:
             # Clear current projects before loading from cache
-            self.dlg.projectsComboBox.clear()
+            self.clear_combobox(self.dlg.projectsComboBox)
             # Use cached data
             self.on_projects_loaded(self.projects_cache)
             return
 
         # Clear current projects (if not already cleared)
-        if self.dlg.projectsComboBox.count() > 0:
-            self.dlg.projectsComboBox.clear()
+        self.clear_combobox(self.dlg.projectsComboBox)
 
         # Show status and disable UI
         self.set_status("Loading projects...")
@@ -689,10 +720,11 @@ class D2SBrowser:
             use_cache (bool): If True, use cached data if available. Defaults to True.
         """
         # Clear current flights
-        self.dlg.flightsComboBox.clear()
+        self.clear_combobox(self.dlg.flightsComboBox)
 
         # Currently selected project
         selected_project = self.projects[self.dlg.projectsComboBox.currentIndex()]
+        self.flights_request_project = selected_project
 
         # Also update map layers for this project
         self.update_map_layers(use_cache=use_cache)
@@ -731,11 +763,16 @@ class D2SBrowser:
 
     def on_flights_loaded(self, flights):
         """Handle successful flights load."""
-        self.flights = flights
+        # Cache the flights under the project they were requested for
+        requested_project = self.flights_request_project
+        self.flights_cache[requested_project.id] = flights
 
-        # Cache the flights for this project
-        selected_project = self.projects[self.dlg.projectsComboBox.currentIndex()]
-        self.flights_cache[selected_project.id] = flights
+        # Drop the result if the user has moved to another project meanwhile
+        project_index = self.dlg.projectsComboBox.currentIndex()
+        if project_index < 0 or self.projects[project_index].id != requested_project.id:
+            return
+
+        self.flights = flights
 
         # Sort by acquisition date
         self.flights = sorted(
@@ -764,7 +801,7 @@ class D2SBrowser:
             self.update_data_products()
         else:
             # No flights, clear current flights and data products
-            self.dlg.flightsComboBox.clear()
+            self.clear_combobox(self.dlg.flightsComboBox)
             self.dlg.dataProductsListWidget.clear()
             self.set_status("No flights found")
             # Re-enable UI
@@ -793,6 +830,7 @@ class D2SBrowser:
 
         # Currently selected flight
         selected_flight = self.flights[self.dlg.flightsComboBox.currentIndex()]
+        self.data_products_request_flight = selected_flight
 
         # Check cache first
         if use_cache and selected_flight.id in self.data_products_cache:
@@ -828,9 +866,20 @@ class D2SBrowser:
 
     def on_data_products_loaded(self, all_data_products):
         """Handle successful data products load."""
-        # Cache the data products for this flight
-        selected_flight = self.flights[self.dlg.flightsComboBox.currentIndex()]
-        self.data_products_cache[selected_flight.id] = all_data_products
+        # Cache the data products under the flight they were requested for
+        requested_flight = self.data_products_request_flight
+        self.data_products_cache[requested_flight.id] = all_data_products
+
+        # Drop the result if the user has moved to another flight meanwhile.
+        # A worker that was superseded still delivers its queued finished
+        # signal, so without this check its products would land in the list
+        # for whichever flight is selected now.
+        flight_index = self.dlg.flightsComboBox.currentIndex()
+        if flight_index < 0 or self.flights[flight_index].id != requested_flight.id:
+            return
+
+        # Start from an empty list so a result never appends to a populated one
+        self.dlg.dataProductsListWidget.clear()
 
         # Filter out any non-raster data products (e.g., point clouds)
         self.data_products = [
@@ -935,6 +984,7 @@ class D2SBrowser:
 
         # Currently selected project
         selected_project = self.projects[self.dlg.projectsComboBox.currentIndex()]
+        self.vector_layers_request_project = selected_project
 
         # Check cache first
         if use_cache and selected_project.id in self.vector_layers_cache:
@@ -970,9 +1020,14 @@ class D2SBrowser:
 
     def on_map_layers_loaded(self, layers):
         """Handle successful vector layers load."""
-        # Cache the vector layers for this project
-        selected_project = self.projects[self.dlg.projectsComboBox.currentIndex()]
-        self.vector_layers_cache[selected_project.id] = layers
+        # Cache the vector layers under the project they were requested for
+        requested_project = self.vector_layers_request_project
+        self.vector_layers_cache[requested_project.id] = layers
+
+        # Drop the result if the user has moved to another project meanwhile
+        project_index = self.dlg.projectsComboBox.currentIndex()
+        if project_index < 0 or self.projects[project_index].id != requested_project.id:
+            return
 
         self.vector_layers = layers
 
